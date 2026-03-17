@@ -61,12 +61,15 @@ impl Default for LocalleafConfig {
             "\\date",
             "\\label",
             "\\paragraph",
-            "\\ref",
             "\\section",
             "\\subsection",
             "\\subsubsection",
             "\\title",
             "\\usepackage",
+            "\\ref",
+            "\\cref",
+            "\\autoref",
+            "\\nameref",
         ];
         default_autocomplete.extend(brace_cmds.iter().map(|&cmd| AutocompleteEntry {
             trigger: cmd.into(),
@@ -138,8 +141,8 @@ impl Default for LocalleafConfig {
         Self {
             ai: AiConfig {
                 url: "http://localhost:11434/api/generate".into(),
-                model: "qwen2.5:2b".into(),
-                system_prompt: "Summarize this text into a concise 3-to-5 word index tag.".into(),
+                model: "qwen3:0.6b".into(),
+                system_prompt: "Find the grammar mistakes and fix them.".into(),
             },
             build: BuildConfig {
                 command: "make paper.pdf".into(),
