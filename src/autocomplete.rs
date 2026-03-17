@@ -148,10 +148,14 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
                 before_brace
             };
 
-            let search_term = text_up_to_cursor[brace_idx + 1..].to_string();
+            let mut search_term = text_up_to_cursor[brace_idx + 1..].to_string();
 
             // Check for Citation
             if cmd_search_area.ends_with("\\cite") {
+                // If there are commas, only autocomplete the segment AFTER the last comma
+                if let Some(last_comma) = search_term.rfind(',') {
+                    search_term = search_term[last_comma + 1..].trim_start().to_string();
+                }
                 return AutocompleteContext::Citation(search_term);
             }
             // Check for Labels (Standard, Cleveref, Autoref, Nameref)
@@ -160,12 +164,17 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
                 || cmd_search_area.ends_with("\\autoref")
                 || cmd_search_area.ends_with("\\nameref")
             {
+                // Labels can also be comma-separated, especially in \cref
+                if let Some(last_comma) = search_term.rfind(',') {
+                    search_term = search_term[last_comma + 1..].trim_start().to_string();
+                }
                 return AutocompleteContext::Label(search_term);
             }
             // Check for Files
             else if cmd_search_area.ends_with("\\includegraphics")
                 || cmd_search_area.ends_with("\\input")
             {
+                // Files are NOT split by commas.
                 return AutocompleteContext::File(search_term);
             }
         }

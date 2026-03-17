@@ -914,7 +914,8 @@ impl LocalleafApp {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     // 1. Intercept Navigation FIRST
-                    // We catch Arrow keys and Enter/Tab before the text editor consumes them
+                    // We catch Arrow keys and Enter/Tab before
+                    // the text editor consumes them
                     let (autocomplete_handled, local_jump_request) =
                         self.intercept_autocomplete_navigation(ui, editor_id);
 
@@ -924,15 +925,18 @@ impl LocalleafApp {
                     }
 
                     // 2. Render Main Editor
-                    // This processes text layout and consumes remaining keyboard inputs
+                    // This processes text layout and consumes
+                    // remaining keyboard inputs
                     let output = self.render_editor_with_gutters(ui, editor_id);
 
                     // 3. Update Autocomplete State
-                    // Check if the user's typing triggered a new macro/citation/file lookup
+                    // Check if the user's typing triggered
+                    // a new macro/citation/file lookup
                     self.update_autocomplete_state(&output, autocomplete_handled);
 
                     // 4. Draw the Floating Menu
-                    // Overlay the popup at the correct screen position based on the editor's galley
+                    // Overlay the popup at the correct screen
+                    // position based on the editor's galley
                     self.draw_autocomplete_popup(ui, &output);
 
                     // 5. Execute Jumps
