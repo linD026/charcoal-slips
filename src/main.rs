@@ -36,7 +36,6 @@ pub struct LocalleafApp {
     dismissed_prefix: Option<String>,
 }
 
-// ... [Keep highlight_latex and highlight_logs functions exactly the same as the previous iteration] ...
 fn highlight_latex(text: &str, font_size: f32, is_dark: bool) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     let font = egui::FontId::monospace(font_size);

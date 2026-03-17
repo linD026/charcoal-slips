@@ -150,7 +150,7 @@ impl Default for LocalleafConfig {
                 auto_save_before_build: true,
             },
             editor: EditorConfig {
-                font_size: 14.0,
+                font_size: 12.0,
                 autocomplete_cmds: default_autocomplete,
                 bib_dir: "bib/".into(),
             },
