@@ -17,8 +17,8 @@ enum RightTab {
     Terminal,
 }
 
-pub struct LocalleafApp {
-    config: LocalleafConfig,
+pub struct CCslipsApp {
+    config: CCslipsConfig,
     current_file: Option<PathBuf>,
     editor_text: String,
     terminal_log: String,
@@ -261,13 +261,13 @@ fn render_dir_tree(
 // APPLICATION LOGIC & RENDERING
 // ==========================================
 
-impl LocalleafApp {
+impl CCslipsApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let config_path = "config_localleaf.json";
+        let config_path = "config_charcoal_slips.json";
         let config = if let Ok(data) = fs::read_to_string(config_path) {
-            serde_json::from_str(&data).unwrap_or_else(|_| LocalleafConfig::default())
+            serde_json::from_str(&data).unwrap_or_else(|_| CCslipsConfig::default())
         } else {
-            let default_cfg = LocalleafConfig::default();
+            let default_cfg = CCslipsConfig::default();
             let _ = fs::write(
                 config_path,
                 serde_json::to_string_pretty(&default_cfg).unwrap(),
@@ -293,7 +293,7 @@ impl LocalleafApp {
             bib_cache: BibCache::new(),
             label_cache: LabelCache::new(),
         };
-        app.append_log("[SYSTEM] Localleaf Editor Initialized.");
+        app.append_log("[SYSTEM] Charcoal Slips Editor Initialized.");
         app
     }
 
@@ -485,7 +485,7 @@ impl LocalleafApp {
             if ui.button(theme_icon).clicked() {
                 self.config.ui.dark_mode = !self.config.ui.dark_mode;
                 fs::write(
-                    "config_localleaf.json",
+                    "config_charcoal_slips.json",
                     serde_json::to_string_pretty(&self.config).unwrap(),
                 )
                 .ok();
@@ -975,7 +975,7 @@ impl LocalleafApp {
 // MAIN LOOP
 // ==========================================
 
-impl eframe::App for LocalleafApp {
+impl eframe::App for CCslipsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_visuals(if self.config.ui.dark_mode {
             egui::Visuals::dark()
@@ -1021,8 +1021,8 @@ impl eframe::App for LocalleafApp {
 
 fn main() -> eframe::Result<()> {
     eframe::run_native(
-        "Localleaf Editor",
+        "Charcoal Slips",
         eframe::NativeOptions::default(),
-        Box::new(|cc| Box::new(LocalleafApp::new(cc))),
+        Box::new(|cc| Box::new(CCslipsApp::new(cc))),
     )
 }
