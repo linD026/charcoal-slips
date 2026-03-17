@@ -433,7 +433,7 @@ impl LocalleafApp {
                 let theme_icon = if self.config.ui.dark_mode {
                     "🌙 Dark"
                 } else {
-                    "☀️ Light"
+                    "☀️  Light"
                 };
                 if ui.button(theme_icon).clicked() {
                     self.config.ui.dark_mode = !self.config.ui.dark_mode;
@@ -494,6 +494,8 @@ impl LocalleafApp {
                 .show(ui, |ui| {
                     ui.horizontal_top(|ui| {
                         let font = egui::FontId::monospace(self.config.editor.font_size);
+
+                        // line number setting
                         let line_count = self.editor_text.lines().count().max(1);
                         let extra_line = if self.editor_text.ends_with('\n') {
                             1
@@ -506,6 +508,7 @@ impl LocalleafApp {
                             .join("\n");
                         ui.label(egui::RichText::new(line_numbers).font(font.clone()).weak());
 
+                        // color setting
                         let font_size = self.config.editor.font_size;
                         let is_dark = self.config.ui.dark_mode;
                         let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
@@ -514,9 +517,11 @@ impl LocalleafApp {
                             ui.fonts(|f| f.layout_job(layout_job))
                         };
 
+                        // editor setting
                         let output = egui::TextEdit::multiline(&mut self.editor_text)
                             .id(editor_id)
                             .font(font)
+                            .code_editor() // focus lock
                             .desired_width(f32::INFINITY)
                             .frame(false)
                             .layouter(&mut layouter)
