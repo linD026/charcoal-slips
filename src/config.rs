@@ -145,7 +145,7 @@ impl Default for LocalleafConfig {
                 system_prompt: "Find the grammar mistakes and fix them.".into(),
             },
             build: BuildConfig {
-                command: "make paper.pdf".into(),
+                command: "make".into(),
                 working_directory: current_path,
                 auto_save_before_build: true,
             },
