@@ -366,7 +366,6 @@ impl LocalleafApp {
             let editor_id = egui::Id::new("latex_editor");
             let mut autocomplete_handled = false;
 
-            // BUG FIX: Abort menu on Shift so text selection works cleanly
             if ui.input(|i| i.modifiers.shift) {
                 self.active_menu = None;
             }
@@ -539,7 +538,6 @@ impl LocalleafApp {
                                         AutocompleteContext::None => String::new(),
                                     };
 
-                                    // BUG FIX: Only recalculate if the cursor actually typed a new letter in the prefix
                                     let mut needs_update = true;
                                     if let Some((active_prefix, _, _, _, active_end)) =
                                         &self.active_menu
