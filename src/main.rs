@@ -1,0 +1,912 @@
+mod ai;
+mod autocomplete;
+mod config;
+
+use ai::*;
+use autocomplete::*;
+use config::*;
+use eframe::egui;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::mpsc::{Receiver, Sender, channel};
+
+#[derive(PartialEq)]
+enum RightTab {
+    Index,
+    Terminal,
+}
+
+pub struct LocalleafApp {
+    config: LocalleafConfig,
+    current_file: Option<PathBuf>,
+    editor_text: String,
+    terminal_log: String,
+    active_right_tab: RightTab,
+    index_entries: Vec<IndexEntry>,
+    tx_ai: Sender<IndexEntry>,
+    rx_ai: Receiver<IndexEntry>,
+    is_generating: bool,
+    jump_request: Option<(usize, usize)>,
+
+    bib_cache: BibCache,
+    label_cache: LabelCache,
+    // (prefix, formatted_display, insert_string, selected_index, start_idx, end_idx)
+    active_menu: Option<(String, Vec<(String, String)>, usize, usize, usize)>,
+    dismissed_prefix: Option<String>,
+}
+
+// ... [Keep highlight_latex and highlight_logs functions exactly the same as the previous iteration] ...
+fn highlight_latex(text: &str, font_size: f32, is_dark: bool) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    let font = egui::FontId::monospace(font_size);
+    let (c_norm, c_cmd, c_comment, c_bracket, c_math) = if is_dark {
+        (
+            egui::Color32::LIGHT_GRAY,
+            egui::Color32::from_rgb(86, 182, 194),
+            egui::Color32::from_rgb(152, 195, 121),
+            egui::Color32::from_rgb(229, 192, 123),
+            egui::Color32::from_rgb(198, 120, 221),
+        )
+    } else {
+        (
+            egui::Color32::BLACK,
+            egui::Color32::from_rgb(9, 105, 218),
+            egui::Color32::from_rgb(17, 99, 41),
+            egui::Color32::from_rgb(215, 58, 73),
+            egui::Color32::from_rgb(111, 66, 193),
+        )
+    };
+
+    let mut token = String::new();
+    let mut state = 0;
+
+    for c in text.chars() {
+        if state == 2 {
+            token.push(c);
+            if c == '\n' {
+                job.append(
+                    &token,
+                    0.0,
+                    egui::TextFormat::simple(font.clone(), c_comment),
+                );
+                token.clear();
+                state = 0;
+            }
+        } else if state == 1 {
+            if c.is_alphabetic() {
+                token.push(c);
+            } else {
+                job.append(&token, 0.0, egui::TextFormat::simple(font.clone(), c_cmd));
+                token.clear();
+                state = 0;
+                if c == '%' {
+                    state = 2;
+                    token.push(c);
+                } else if c == '\\' {
+                    state = 1;
+                    token.push(c);
+                } else if c == '{' || c == '}' || c == '[' || c == ']' {
+                    job.append(
+                        &c.to_string(),
+                        0.0,
+                        egui::TextFormat::simple(font.clone(), c_bracket),
+                    );
+                } else if c == '$' {
+                    job.append(
+                        &c.to_string(),
+                        0.0,
+                        egui::TextFormat::simple(font.clone(), c_math),
+                    );
+                } else {
+                    token.push(c);
+                }
+            }
+        } else {
+            if c == '%' || c == '\\' || c == '{' || c == '}' || c == '[' || c == ']' || c == '$' {
+                if !token.is_empty() {
+                    job.append(&token, 0.0, egui::TextFormat::simple(font.clone(), c_norm));
+                    token.clear();
+                }
+                if c == '%' {
+                    state = 2;
+                    token.push(c);
+                } else if c == '\\' {
+                    state = 1;
+                    token.push(c);
+                } else if c == '{' || c == '}' || c == '[' || c == ']' {
+                    job.append(
+                        &c.to_string(),
+                        0.0,
+                        egui::TextFormat::simple(font.clone(), c_bracket),
+                    );
+                } else if c == '$' {
+                    job.append(
+                        &c.to_string(),
+                        0.0,
+                        egui::TextFormat::simple(font.clone(), c_math),
+                    );
+                }
+            } else {
+                token.push(c);
+            }
+        }
+    }
+    if !token.is_empty() {
+        if state == 2 {
+            job.append(
+                &token,
+                0.0,
+                egui::TextFormat::simple(font.clone(), c_comment),
+            );
+        } else if state == 1 {
+            job.append(&token, 0.0, egui::TextFormat::simple(font.clone(), c_cmd));
+        } else {
+            job.append(&token, 0.0, egui::TextFormat::simple(font.clone(), c_norm));
+        }
+    }
+    job
+}
+
+fn highlight_logs(text: &str, font_size: f32, is_dark: bool) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    let font = egui::FontId::monospace(font_size);
+    for line in text.lines() {
+        let color = if line.contains("[ERROR]") || line.contains("[STDERR]") || line.contains("❌")
+        {
+            if is_dark {
+                egui::Color32::from_rgb(224, 108, 117)
+            } else {
+                egui::Color32::DARK_RED
+            }
+        } else if line.contains("[SUCCESS]") || line.contains("[FILE]") || line.contains("✅") {
+            if is_dark {
+                egui::Color32::from_rgb(152, 195, 121)
+            } else {
+                egui::Color32::from_rgb(17, 99, 41)
+            }
+        } else if line.contains("[BUILD]") || line.contains("[SYSTEM]") {
+            if is_dark {
+                egui::Color32::from_rgb(97, 175, 239)
+            } else {
+                egui::Color32::from_rgb(9, 105, 218)
+            }
+        } else if line.contains("[AI]") {
+            if is_dark {
+                egui::Color32::from_rgb(198, 120, 221)
+            } else {
+                egui::Color32::from_rgb(139, 0, 139)
+            }
+        } else {
+            if is_dark {
+                egui::Color32::LIGHT_GRAY
+            } else {
+                egui::Color32::DARK_GRAY
+            }
+        };
+        job.append(line, 0.0, egui::TextFormat::simple(font.clone(), color));
+        job.append("\n", 0.0, egui::TextFormat::simple(font.clone(), color));
+    }
+    job
+}
+
+fn render_dir_tree(
+    ui: &mut egui::Ui,
+    path: &Path,
+    current_file: &Option<PathBuf>,
+) -> Option<PathBuf> {
+    let mut clicked = None;
+    if let Ok(entries) = fs::read_dir(path) {
+        let mut dirs = Vec::new();
+        let mut files = Vec::new();
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .starts_with('.')
+            {
+                continue;
+            }
+            if p.is_dir() {
+                dirs.push(p);
+            } else {
+                files.push(p);
+            }
+        }
+        dirs.sort();
+        files.sort();
+
+        for d in dirs {
+            let name = d
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            egui::CollapsingHeader::new(format!("📁 {}", name))
+                .default_open(false)
+                .show(ui, |ui| {
+                    if let Some(res) = render_dir_tree(ui, &d, current_file) {
+                        clicked = Some(res);
+                    }
+                });
+        }
+        for f in files {
+            let name = f
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let is_selected = current_file.as_ref() == Some(&f);
+            if ui
+                .selectable_label(is_selected, format!("📄 {}", name))
+                .clicked()
+            {
+                clicked = Some(f);
+            }
+        }
+    }
+    clicked
+}
+
+impl LocalleafApp {
+    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let config_path = "config_localleaf.json";
+        let config = if let Ok(data) = fs::read_to_string(config_path) {
+            serde_json::from_str(&data).unwrap_or_else(|_| LocalleafConfig::default())
+        } else {
+            let default_cfg = LocalleafConfig::default();
+            let _ = fs::write(
+                config_path,
+                serde_json::to_string_pretty(&default_cfg).unwrap(),
+            );
+            default_cfg
+        };
+
+        let (tx_ai, rx_ai) = channel();
+
+        let mut app = Self {
+            config,
+            current_file: None,
+            editor_text: String::new(),
+            terminal_log: String::new(),
+            active_right_tab: RightTab::Index,
+            index_entries: Vec::new(),
+            tx_ai,
+            rx_ai,
+            is_generating: false,
+            jump_request: None,
+            active_menu: None,
+            dismissed_prefix: None,
+            bib_cache: BibCache::new(),
+            label_cache: LabelCache::new(),
+        };
+        app.append_log("[SYSTEM] Localleaf Editor Initialized.");
+        app
+    }
+
+    fn append_log(&mut self, message: &str) {
+        self.terminal_log.push_str(message);
+        self.terminal_log.push('\n');
+    }
+
+    fn save_current_file(&mut self) {
+        if let Some(path) = &self.current_file {
+            match fs::write(path, &self.editor_text) {
+                Ok(_) => self.append_log(&format!("[FILE] 💾 Saved: {}", path.display())),
+                Err(e) => self.append_log(&format!("[ERROR] ❌ Save Failed: {}", e)),
+            }
+        }
+    }
+
+    fn execute_build(&mut self) {
+        if self.config.build.auto_save_before_build {
+            self.save_current_file();
+        }
+        let cmd = self.config.build.command.clone();
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.is_empty() {
+            return;
+        }
+
+        self.append_log(&format!("[BUILD] 🔄 Executing: {}", cmd));
+        self.active_right_tab = RightTab::Terminal;
+
+        match Command::new(parts[0])
+            .args(&parts[1..])
+            .current_dir(&self.config.build.working_directory)
+            .output()
+        {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                if out.status.success() {
+                    self.append_log("[SUCCESS] ✅ Build Completed.");
+                } else {
+                    self.append_log(&format!("[ERROR] ❌ Build Failed: {}", out.status));
+                }
+                if !stdout.is_empty() {
+                    self.append_log(&format!("[STDOUT]\n{}", stdout));
+                }
+                if !stderr.is_empty() {
+                    self.append_log(&format!("[STDERR]\n{}", stderr));
+                }
+            }
+            Err(e) => self.append_log(&format!("[ERROR] ❌ Pipeline failed: {}", e)),
+        }
+    }
+
+    fn render_left_panel(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::left("left_panel")
+            .resizable(true)
+            .default_width(self.config.ui.left_panel_width)
+            .show(ctx, |ui| {
+                ui.heading("Workspace");
+                ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if let Some(clicked_path) = render_dir_tree(
+                        ui,
+                        Path::new(&self.config.build.working_directory),
+                        &self.current_file,
+                    ) {
+                        if let Ok(content) = fs::read_to_string(&clicked_path) {
+                            self.editor_text = content;
+                            self.current_file = Some(clicked_path.clone());
+                            self.append_log(&format!(
+                                "[FILE] 📂 Opened: {}",
+                                clicked_path.display()
+                            ));
+                        }
+                    }
+                });
+            });
+    }
+
+    fn render_central_panel(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let editor_id = egui::Id::new("latex_editor");
+            let mut autocomplete_handled = false;
+
+            // BUG FIX: Abort menu on Shift so text selection works cleanly
+            if ui.input(|i| i.modifiers.shift) {
+                self.active_menu = None;
+            }
+
+            // 1. Intercept Autocomplete Navigation
+            if let Some((prefix, matches, mut selected_idx, start, end)) = self.active_menu.clone()
+            {
+                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+                    selected_idx = (selected_idx + 1).min(matches.len().saturating_sub(1));
+                    self.active_menu = Some((prefix, matches, selected_idx, start, end));
+                    autocomplete_handled = true;
+                } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp))
+                {
+                    selected_idx = selected_idx.saturating_sub(1);
+                    self.active_menu = Some((prefix, matches, selected_idx, start, end));
+                    autocomplete_handled = true;
+                } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+                    || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+                {
+                    let (_, insert_raw) = &matches[selected_idx];
+                    let mut insert_str = insert_raw.clone();
+                    let cursor_offset = if let Some(idx) = insert_str.find("$CURSOR$") {
+                        let offset = insert_str.len() - (idx + "$CURSOR$".len());
+                        insert_str = insert_str.replace("$CURSOR$", "");
+                        offset
+                    } else {
+                        0
+                    };
+
+                    self.editor_text.replace_range(start..end, &insert_str);
+                    let new_pos = start + insert_str.len() - cursor_offset;
+                    self.jump_request = Some((new_pos, new_pos));
+                    self.active_menu = None;
+                    self.dismissed_prefix = None;
+                    autocomplete_handled = true;
+                } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+                {
+                    self.dismissed_prefix = Some(prefix);
+                    self.active_menu = None;
+                    autocomplete_handled = true;
+                    ui.ctx().memory_mut(|mem| mem.request_focus(editor_id));
+                }
+            }
+
+            // 2. Toolbar
+            let mut current_selection = None;
+            if let Some(state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
+                if let Some(range) = state.cursor.char_range() {
+                    let start = range.primary.index.min(range.secondary.index);
+                    let end = range.primary.index.max(range.secondary.index);
+                    if start != end {
+                        current_selection = Some((start, end));
+                    }
+                }
+            }
+
+            ui.horizontal(|ui| {
+                if ui.button("💾 Save (Ctrl+S)").clicked() {
+                    self.save_current_file();
+                }
+                if ui.button("🚀 Build (Ctrl+B)").clicked() {
+                    self.execute_build();
+                }
+                ui.separator();
+                let theme_icon = if self.config.ui.dark_mode {
+                    "🌙 Dark"
+                } else {
+                    "☀️ Light"
+                };
+                if ui.button(theme_icon).clicked() {
+                    self.config.ui.dark_mode = !self.config.ui.dark_mode;
+                    fs::write(
+                        "config_localleaf.json",
+                        serde_json::to_string_pretty(&self.config).unwrap(),
+                    )
+                    .ok();
+                }
+                ui.separator();
+                if ui.button("A-").clicked() {
+                    self.config.editor.font_size -= 1.0;
+                }
+                if ui.button("A+").clicked() {
+                    self.config.editor.font_size += 1.0;
+                }
+                ui.separator();
+
+                // AI Button logic mapping directly to current file
+                if let Some((start, end)) = current_selection {
+                    if let Some(path) = &self.current_file {
+                        if ui
+                            .button(
+                                egui::RichText::new("🧠 Send to AI (Ctrl+I)")
+                                    .color(egui::Color32::LIGHT_GREEN),
+                            )
+                            .clicked()
+                        {
+                            let selected_str: String = self
+                                .editor_text
+                                .chars()
+                                .skip(start)
+                                .take(end - start)
+                                .collect();
+                            trigger_ai_indexing(
+                                self.config.ai.clone(),
+                                path.clone(),
+                                selected_str,
+                                start,
+                                end,
+                                self.tx_ai.clone(),
+                            );
+                            self.active_right_tab = RightTab::Index;
+                            self.is_generating = true;
+                        }
+                    } else {
+                        ui.add_enabled(false, egui::Button::new("Save file first to use AI"));
+                    }
+                } else {
+                    ui.add_enabled(false, egui::Button::new("Highlight text to index..."));
+                }
+            });
+            ui.separator();
+
+            // 3. Main Editor
+            egui::ScrollArea::both()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        let font = egui::FontId::monospace(self.config.editor.font_size);
+                        let line_count = self.editor_text.lines().count().max(1);
+                        let extra_line = if self.editor_text.ends_with('\n') {
+                            1
+                        } else {
+                            0
+                        };
+                        let line_numbers = (1..=(line_count + extra_line))
+                            .map(|i| i.to_string())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        ui.label(egui::RichText::new(line_numbers).font(font.clone()).weak());
+
+                        let font_size = self.config.editor.font_size;
+                        let is_dark = self.config.ui.dark_mode;
+                        let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
+                            let mut layout_job = highlight_latex(string, font_size, is_dark);
+                            layout_job.wrap.max_width = wrap_width;
+                            ui.fonts(|f| f.layout_job(layout_job))
+                        };
+
+                        let output = egui::TextEdit::multiline(&mut self.editor_text)
+                            .id(editor_id)
+                            .font(font)
+                            .desired_width(f32::INFINITY)
+                            .frame(false)
+                            .layouter(&mut layouter)
+                            .show(ui);
+
+                        // 4. Update Autocomplete Menu State
+                        if output.response.has_focus() && !autocomplete_handled {
+                            if let Some(cursor_range) = output.cursor_range {
+                                let c_idx = cursor_range.primary.ccursor.index;
+                                if c_idx <= self.editor_text.len() {
+                                    let text_up_to_cursor = &self.editor_text[..c_idx];
+                                    let context = detect_context(text_up_to_cursor);
+
+                                    let current_prefix = match &context {
+                                        AutocompleteContext::Macro(p)
+                                        | AutocompleteContext::Citation(p)
+                                        | AutocompleteContext::Label(p)
+                                        | AutocompleteContext::File(p) => p.clone(),
+                                        AutocompleteContext::None => String::new(),
+                                    };
+
+                                    // BUG FIX: Only recalculate if the cursor actually typed a new letter in the prefix
+                                    let mut needs_update = true;
+                                    if let Some((active_prefix, _, _, _, active_end)) =
+                                        &self.active_menu
+                                    {
+                                        if active_prefix == &current_prefix && *active_end == c_idx
+                                        {
+                                            needs_update = false; // Cursor hasn't moved, do not wipe selected_idx
+                                        }
+                                    }
+
+                                    if needs_update {
+                                        match context {
+                                            AutocompleteContext::Citation(prefix) => {
+                                                let keys = self.bib_cache.get_keys(
+                                                    Path::new(&self.config.build.working_directory),
+                                                    &self.config.editor.bib_dir,
+                                                );
+                                                let matches: Vec<(String, String)> = keys
+                                                    .into_iter()
+                                                    .filter(|k| {
+                                                        k.to_lowercase()
+                                                            .contains(&prefix.to_lowercase())
+                                                    })
+                                                    .map(|k| (k.clone(), k))
+                                                    .take(8)
+                                                    .collect();
+                                                if !matches.is_empty() {
+                                                    self.active_menu = Some((
+                                                        prefix.clone(),
+                                                        matches,
+                                                        0,
+                                                        c_idx - prefix.len(),
+                                                        c_idx,
+                                                    ));
+                                                } else {
+                                                    self.active_menu = None;
+                                                }
+                                            }
+                                            AutocompleteContext::Label(prefix) => {
+                                                let keys = self.label_cache.get_labels(Path::new(
+                                                    &self.config.build.working_directory,
+                                                ));
+                                                let matches: Vec<(String, String)> = keys
+                                                    .into_iter()
+                                                    .filter(|k| {
+                                                        k.to_lowercase()
+                                                            .contains(&prefix.to_lowercase())
+                                                    })
+                                                    .map(|k| (k.clone(), k))
+                                                    .take(8)
+                                                    .collect();
+                                                if !matches.is_empty() {
+                                                    self.active_menu = Some((
+                                                        prefix.clone(),
+                                                        matches,
+                                                        0,
+                                                        c_idx - prefix.len(),
+                                                        c_idx,
+                                                    ));
+                                                } else {
+                                                    self.active_menu = None;
+                                                }
+                                            }
+
+                                            AutocompleteContext::File(prefix) => {
+                                                let files = get_file_suggestions(
+                                                    Path::new(&self.config.build.working_directory),
+                                                    &prefix,
+                                                );
+                                                let matches: Vec<(String, String)> = files
+                                                    .into_iter()
+                                                    .map(|f| (f.clone(), f))
+                                                    .take(8)
+                                                    .collect();
+                                                if !matches.is_empty() {
+                                                    self.active_menu = Some((
+                                                        prefix.clone(),
+                                                        matches,
+                                                        0,
+                                                        c_idx - prefix.len(),
+                                                        c_idx,
+                                                    ));
+                                                } else {
+                                                    self.active_menu = None;
+                                                }
+                                            }
+                                            AutocompleteContext::Macro(prefix) => {
+                                                if self.dismissed_prefix.as_ref() != Some(&prefix) {
+                                                    let mut matches: Vec<_> = self
+                                                        .config
+                                                        .editor
+                                                        .autocomplete_cmds
+                                                        .iter()
+                                                        .filter(|c| {
+                                                            c.trigger
+                                                                .to_lowercase()
+                                                                .contains(&prefix.to_lowercase())
+                                                        })
+                                                        .map(|c| {
+                                                            (c.trigger.clone(), c.insert.clone())
+                                                        })
+                                                        .collect();
+                                                    matches.sort_by(|(a, _), (b, _)| {
+                                                        let a_starts = a.starts_with(&prefix);
+                                                        let b_starts = b.starts_with(&prefix);
+                                                        if a_starts && !b_starts {
+                                                            std::cmp::Ordering::Less
+                                                        } else if !a_starts && b_starts {
+                                                            std::cmp::Ordering::Greater
+                                                        } else {
+                                                            a.cmp(b)
+                                                        }
+                                                    });
+                                                    matches.truncate(8);
+                                                    if !matches.is_empty() {
+                                                        self.active_menu = Some((
+                                                            prefix.clone(),
+                                                            matches,
+                                                            0,
+                                                            c_idx - prefix.len(),
+                                                            c_idx,
+                                                        ));
+                                                    } else {
+                                                        self.active_menu = None;
+                                                    }
+                                                }
+                                            }
+                                            AutocompleteContext::None => {
+                                                self.active_menu = None;
+                                                self.dismissed_prefix = None;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 5. Draw the Floating Menu
+                        if let Some((_, matches, selected_idx, _, _)) = &self.active_menu {
+                            if let Some(cursor_range) = output.cursor_range {
+                                let galley = &output.galley;
+                                let pos_in_galley =
+                                    galley.pos_from_ccursor(cursor_range.primary.ccursor);
+                                let screen_pos = output.galley_pos
+                                    + pos_in_galley.min.to_vec2()
+                                    + egui::vec2(0.0, font_size * 1.5);
+
+                                egui::Area::new(egui::Id::new("autocomplete_popup"))
+                                    .fixed_pos(screen_pos)
+                                    .order(egui::Order::Tooltip)
+                                    .show(ui.ctx(), |ui| {
+                                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                            ui.vertical(|ui| {
+                                                for (i, (display, _)) in matches.iter().enumerate()
+                                                {
+                                                    if i == *selected_idx {
+                                                        ui.label(
+                                                            egui::RichText::new(format!(
+                                                                "▶ {}",
+                                                                display
+                                                            ))
+                                                            .color(egui::Color32::from_rgb(
+                                                                86, 182, 194,
+                                                            ))
+                                                            .strong(),
+                                                        );
+                                                    } else {
+                                                        ui.label(egui::RichText::new(format!(
+                                                            "  {}",
+                                                            display
+                                                        )));
+                                                    }
+                                                }
+                                            });
+                                        });
+                                    });
+                            }
+                        }
+
+                        if let Some((start, end)) = self.jump_request.take() {
+                            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id)
+                            {
+                                let ccursor_start = egui::text::CCursor::new(start);
+                                let ccursor_end = egui::text::CCursor::new(end);
+                                state
+                                    .cursor
+                                    .set_char_range(Some(egui::text::CCursorRange::two(
+                                        ccursor_start,
+                                        ccursor_end,
+                                    )));
+                                egui::TextEdit::store_state(ui.ctx(), editor_id, state);
+                                output.response.request_focus();
+                            }
+                        }
+                    });
+                });
+        });
+    }
+}
+
+impl eframe::App for LocalleafApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.set_visuals(if self.config.ui.dark_mode {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        });
+
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S)) {
+            self.save_current_file();
+        }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::B)) {
+            self.execute_build();
+        }
+        if ctx.input(|i| {
+            i.modifiers.command
+                && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
+        }) {
+            self.config.editor.font_size = (self.config.editor.font_size + 1.0).clamp(8.0, 48.0);
+        }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Minus)) {
+            self.config.editor.font_size = (self.config.editor.font_size - 1.0).clamp(8.0, 48.0);
+        }
+
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::I)) {
+            let editor_id = egui::Id::new("latex_editor");
+            if let Some(state) = egui::TextEdit::load_state(ctx, editor_id) {
+                if let Some(range) = state.cursor.char_range() {
+                    let start = range.primary.index.min(range.secondary.index);
+                    let end = range.primary.index.max(range.secondary.index);
+                    if start != end {
+                        if let Some(path) = &self.current_file {
+                            let selected_str: String = self
+                                .editor_text
+                                .chars()
+                                .skip(start)
+                                .take(end - start)
+                                .collect();
+                            trigger_ai_indexing(
+                                self.config.ai.clone(),
+                                path.clone(),
+                                selected_str,
+                                start,
+                                end,
+                                self.tx_ai.clone(),
+                            );
+                            self.active_right_tab = RightTab::Index;
+                            self.is_generating = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Ok(entry) = self.rx_ai.try_recv() {
+            if entry.ai_summary.starts_with("Error:") {
+                self.append_log(&format!("[AI] ❌ Failed: {}", entry.ai_summary));
+                self.active_right_tab = RightTab::Terminal;
+            } else {
+                self.append_log(&format!("[AI] ✅ Generated index '{}'", entry.ai_summary));
+                self.index_entries.push(entry);
+            }
+            self.is_generating = false;
+        }
+
+        self.render_left_panel(ctx);
+        egui::SidePanel::right("right_panel")
+            .resizable(true)
+            .default_width(self.config.ui.right_panel_width)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.active_right_tab, RightTab::Index, "🧠 AI Index");
+                    ui.selectable_value(
+                        &mut self.active_right_tab,
+                        RightTab::Terminal,
+                        "💻 Terminal",
+                    );
+                });
+                ui.separator();
+                match self.active_right_tab {
+                    RightTab::Index => {
+                        // 1. Create a temporary variable to hold the action
+                        let mut trigger_jump = None;
+
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for entry in &self.index_entries {
+                                // Immutable lock begins
+                                ui.group(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(&entry.ai_summary).strong().size(15.0),
+                                    );
+                                    let preview = if entry.selected_text.len() > 60 {
+                                        format!("\"{}...\"", &entry.selected_text[..60])
+                                    } else {
+                                        format!("\"{}\"", entry.selected_text)
+                                    };
+                                    ui.label(egui::RichText::new(preview).weak().italics());
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            // Display the timestamp
+                                            ui.label(
+                                                egui::RichText::new(
+                                                    entry.timestamp.format("%H:%M:%S").to_string(),
+                                                )
+                                                .weak(),
+                                            );
+                                        },
+                                    );
+
+                                    if ui.button("⮐ Jump to Selection").clicked() {
+                                        // Save the intended action, but don't mutate `self` yet!
+                                        trigger_jump = Some((
+                                            entry.file_path.clone(),
+                                            entry.start_idx,
+                                            entry.end_idx,
+                                        ));
+                                    }
+                                });
+                            } // Immutable lock ends here
+                        });
+
+                        // 2. Execute the mutable changes safely AFTER the loop is finished
+                        if let Some((path, start, end)) = trigger_jump {
+                            if self.current_file.as_ref() != Some(&path) {
+                                if let Ok(content) = fs::read_to_string(&path) {
+                                    self.editor_text = content;
+                                    self.current_file = Some(path.clone());
+                                    self.append_log(&format!(
+                                        "[FILE] 📂 Auto-opened for jump: {}",
+                                        path.display()
+                                    ));
+                                }
+                            }
+                            self.jump_request = Some((start, end));
+                        }
+                    }
+                    RightTab::Terminal => {
+                        egui::ScrollArea::both()
+                            .stick_to_bottom(true)
+                            .show(ui, |ui| {
+                                let is_dark = self.config.ui.dark_mode;
+                                let mut layouter =
+                                    |ui: &egui::Ui, string: &str, wrap_width: f32| {
+                                        let mut job = highlight_logs(string, 12.0, is_dark);
+                                        job.wrap.max_width = wrap_width;
+                                        ui.fonts(|f| f.layout_job(job))
+                                    };
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut self.terminal_log)
+                                        .desired_width(f32::INFINITY)
+                                        .frame(false)
+                                        .layouter(&mut layouter),
+                                );
+                            });
+                    }
+                }
+            });
+        self.render_central_panel(ctx);
+    }
+}
+
+fn main() -> eframe::Result<()> {
+    eframe::run_native(
+        "Localleaf Editor",
+        eframe::NativeOptions::default(),
+        Box::new(|cc| Box::new(LocalleafApp::new(cc))),
+    )
+}
