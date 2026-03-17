@@ -657,15 +657,14 @@ impl LocalleafApp {
         output
     }
 
-    fn handle_autocomplete_menu(
+    fn intercept_autocomplete_navigation(
         &mut self,
         ui: &mut egui::Ui,
-        output: &egui::text_edit::TextEditOutput,
         editor_id: egui::Id,
-    ) {
+    ) -> (bool, Option<(usize, usize)>) {
         let mut autocomplete_handled = false;
+        let mut local_jump_request = None;
 
-        // 1. Menu Interactions & Rotation
         if let Some((prefix, matches, mut selected_idx, start, end)) = self.active_menu.clone() {
             if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
                 selected_idx = (selected_idx + 1) % matches.len(); // Wrap to top
@@ -694,7 +693,7 @@ impl LocalleafApp {
 
                 self.editor_text.replace_range(start..end, &insert_str);
                 let new_pos = start + insert_str.len() - cursor_offset;
-                self.jump_request = Some((new_pos, new_pos));
+                local_jump_request = Some((new_pos, new_pos));
                 self.active_menu = None;
                 self.dismissed_prefix = None;
                 autocomplete_handled = true;
@@ -702,19 +701,24 @@ impl LocalleafApp {
                 self.dismissed_prefix = Some(prefix);
                 self.active_menu = None;
                 autocomplete_handled = true;
-                // Defer focus request so cursor doesn't disappear
                 ui.ctx().memory_mut(|mem| mem.request_focus(editor_id));
             }
         }
+        (autocomplete_handled, local_jump_request)
+    }
 
-        // 2. Check for Text Selection to cleanly dismiss menu (Fixes Shift bug)
+    fn update_autocomplete_state(
+        &mut self,
+        output: &egui::text_edit::TextEditOutput,
+        autocomplete_handled: bool,
+    ) {
         if let Some(cursor_range) = output.cursor_range {
+            // Dismiss if text is selected
             if cursor_range.primary.ccursor.index != cursor_range.secondary.ccursor.index {
                 self.active_menu = None;
             }
         }
 
-        // 3. Update Autocomplete State dynamically
         if output.response.has_focus() && !autocomplete_handled {
             if let Some(cursor_range) = output.cursor_range {
                 let c_idx = cursor_range.primary.ccursor.index;
@@ -853,8 +857,9 @@ impl LocalleafApp {
                 }
             }
         }
+    }
 
-        // 4. Draw the Floating Menu
+    fn draw_autocomplete_popup(&self, ui: &mut egui::Ui, output: &egui::text_edit::TextEditOutput) {
         if let Some((_, matches, selected_idx, _, _)) = &self.active_menu {
             if let Some(cursor_range) = output.cursor_range {
                 let galley = &output.galley;
@@ -908,10 +913,29 @@ impl LocalleafApp {
             egui::ScrollArea::both()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    let output = self.render_editor_with_gutters(ui, editor_id);
-                    self.handle_autocomplete_menu(ui, &output, editor_id);
+                    // 1. Intercept Navigation FIRST
+                    // We catch Arrow keys and Enter/Tab before the text editor consumes them
+                    let (autocomplete_handled, local_jump_request) =
+                        self.intercept_autocomplete_navigation(ui, editor_id);
 
-                    // Execute Jumps
+                    // Register any jump requested by the autocomplete insertion
+                    if local_jump_request.is_some() {
+                        self.jump_request = local_jump_request;
+                    }
+
+                    // 2. Render Main Editor
+                    // This processes text layout and consumes remaining keyboard inputs
+                    let output = self.render_editor_with_gutters(ui, editor_id);
+
+                    // 3. Update Autocomplete State
+                    // Check if the user's typing triggered a new macro/citation/file lookup
+                    self.update_autocomplete_state(&output, autocomplete_handled);
+
+                    // 4. Draw the Floating Menu
+                    // Overlay the popup at the correct screen position based on the editor's galley
+                    self.draw_autocomplete_popup(ui, &output);
+
+                    // 5. Execute Jumps
                     if let Some((start, end)) = self.jump_request.take() {
                         if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
                             let ccursor_start = egui::text::CCursor::new(start);
