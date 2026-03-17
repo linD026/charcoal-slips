@@ -544,25 +544,7 @@ impl LocalleafApp {
         let font_size = self.config.editor.font_size;
         let is_dark = self.config.ui.dark_mode;
 
-        // Calculate dynamic gutter width based on true line count
-        let total_lines = self.editor_text.split('\n').count();
-        let gutter_width = ui
-            .fonts(|f| {
-                f.layout_no_wrap(
-                    total_lines.to_string(),
-                    font.clone(),
-                    ui.visuals().text_color(),
-                )
-            })
-            .rect
-            .width()
-            + 15.0;
-
-        let available_rect = ui.available_rect_before_wrap();
-        let (gutter_rect, editor_rect) =
-            available_rect.split_left_right_at_x(available_rect.left() + gutter_width);
-
-        // --- BUG FIX 2: Prevent Alt+Tab Ghost Inputs ---
+        // Prevent Alt+Tab Ghost Inputs
         let mut window_just_focused = false;
         ui.input(|i| {
             for e in &i.events {
@@ -594,6 +576,24 @@ impl LocalleafApp {
             });
         });
 
+        // Calculate dynamic gutter width based on true line count
+        let total_lines = self.editor_text.split('\n').count();
+        let gutter_width = ui
+            .fonts(|f| {
+                f.layout_no_wrap(
+                    total_lines.to_string(),
+                    font.clone(),
+                    ui.visuals().text_color(),
+                )
+            })
+            .rect
+            .width()
+            + 15.0;
+
+        let available_rect = ui.available_rect_before_wrap();
+        let (gutter_rect, editor_rect) =
+            available_rect.split_left_right_at_x(available_rect.left() + gutter_width);
+
         // Render the Editor in the right rect
         let mut editor_ui = ui.child_ui(editor_rect, *ui.layout());
         let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
@@ -612,7 +612,7 @@ impl LocalleafApp {
             .layouter(&mut layouter)
             .show(&mut editor_ui);
 
-        // --- BUG FIX 1: Flawless Line Numbers ---
+        // Flawless Line Numbers
         let painter = ui.painter_at(gutter_rect);
         let galley = &output.galley;
 
