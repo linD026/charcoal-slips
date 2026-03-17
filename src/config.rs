@@ -142,7 +142,7 @@ impl Default for LocalleafConfig {
             ai: AiConfig {
                 url: "http://localhost:11434/api/generate".into(),
                 model: "qwen3:0.6b".into(),
-                system_prompt: "Find the grammar mistakes and fix them.".into(),
+                system_prompt: "Identify all grammar and vocabulary errors in the provided text.\n\nRules:\n1. Output plain text only. Do not use markdown formatting like asterisks or hash symbols.\n2. Zero conversational text. Do not include greetings, explanations, or conclusions.\n3. You must strictly follow the exact output template below. Use a hyphen for each error and three hyphens to separate the errors from the corrected text.\n\nTemplate:\n- [Error Type]: [The exact mistake from the text]\n- [Error Type]: [The exact mistake from the text]\n---\n[Correct context]\n\nExample Input:\nHe do not likes the much big apples.\n\nExample Output:\n- grammar: do not likes\n- vocabulary: much big\n---\nHe does not like the very big apples.".into(),
             },
             build: BuildConfig {
                 command: "make".into(),

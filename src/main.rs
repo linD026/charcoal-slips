@@ -53,11 +53,16 @@ fn highlight_latex(text: &str, font_size: f32, is_dark: bool) -> egui::text::Lay
         )
     } else {
         (
-            egui::Color32::BLACK,
-            egui::Color32::from_rgb(9, 105, 218),
-            egui::Color32::from_rgb(17, 99, 41),
-            egui::Color32::from_rgb(215, 58, 73),
-            egui::Color32::from_rgb(111, 66, 193),
+            //egui::Color32::BLACK,
+            //egui::Color32::from_rgb(9, 105, 218),
+            //egui::Color32::from_rgb(17, 99, 41),
+            //egui::Color32::from_rgb(215, 58, 73),
+            //egui::Color32::from_rgb(111, 66, 193),
+            egui::Color32::from_rgb(36, 41, 46),   // Near Black (Normal text)
+            egui::Color32::from_rgb(0, 92, 197),   // Deep Blue (Commands)
+            egui::Color32::from_rgb(106, 115, 125),// Muted Gray-Green (Comments)
+            egui::Color32::from_rgb(215, 58, 73),  // Crimson Red (Brackets)
+            egui::Color32::from_rgb(111, 66, 193), // Royal Purple (Math mode)
         )
     };
 
@@ -556,13 +561,11 @@ impl LocalleafApp {
 
         ui.input_mut(|i| {
             i.events.retain(|e| {
-                // Discard raw \t text insertions if Alt is held or window just gained focus
                 if let egui::Event::Text(text) = e {
                     if text == "\t" && (i.modifiers.alt || window_just_focused) {
                         return false;
                     }
                 }
-                // Discard physical Tab key events under the same conditions
                 if let egui::Event::Key {
                     key: egui::Key::Tab,
                     ..
@@ -590,30 +593,36 @@ impl LocalleafApp {
             .width()
             + 15.0;
 
-        let available_rect = ui.available_rect_before_wrap();
-        let (gutter_rect, editor_rect) =
-            available_rect.split_left_right_at_x(available_rect.left() + gutter_width);
-
-        // Render the Editor in the right rect
-        let mut editor_ui = ui.child_ui(editor_rect, *ui.layout());
         let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
             let mut layout_job = highlight_latex(string, font_size, is_dark);
             layout_job.wrap.max_width = wrap_width;
             ui.fonts(|f| f.layout_job(layout_job))
         };
 
-        let output = egui::TextEdit::multiline(&mut self.editor_text)
-            .id(editor_id)
-            .font(font.clone())
-            .code_editor()
-            .desired_width(f32::INFINITY)
-            .frame(false)
-            .margin(egui::vec2(0.0, 0.0)) // Crucial for vertical alignment
-            .layouter(&mut layouter)
-            .show(&mut editor_ui);
+        // Render the Editor cleanly using standard layout to fix the scroll bug
+        let output = ui
+            .horizontal_top(|ui| {
+                ui.add_space(gutter_width); // Push editor to the right to make room for numbers
+
+                egui::TextEdit::multiline(&mut self.editor_text)
+                    .id(editor_id)
+                    .font(font.clone())
+                    .code_editor()
+                    .desired_width(f32::INFINITY)
+                    .frame(false)
+                    .margin(egui::vec2(0.0, 0.0)) // Crucial for vertical alignment
+                    .layouter(&mut layouter)
+                    .show(ui)
+            })
+            .inner;
+
+        // --- THE STRAIGHTFORWARD PADDING ---
+        // Blindly add 40 lines of space to the bottom of the ScrollArea
+        let padding_height = font_size * 1.5 * 40.0;
+        ui.add_space(padding_height);
 
         // Flawless Line Numbers
-        let painter = ui.painter_at(gutter_rect);
+        let painter = ui.painter();
         let galley = &output.galley;
 
         let mut current_logical_line = 1;
@@ -621,8 +630,9 @@ impl LocalleafApp {
 
         for row in &galley.rows {
             if is_start_of_line {
+                // Paint the number relative to the top-left of the text's galley
                 let pos = egui::pos2(
-                    gutter_rect.right() - 5.0,
+                    output.galley_pos.x - 10.0,
                     output.galley_pos.y + row.rect.min.y,
                 );
                 painter.text(
@@ -642,7 +652,7 @@ impl LocalleafApp {
         // Draw final trailing newline number if the file ends with an empty line
         if self.editor_text.ends_with('\n') {
             let pos = egui::pos2(
-                gutter_rect.right() - 5.0,
+                output.galley_pos.x - 10.0,
                 output.galley_pos.y + galley.mesh_bounds.max.y,
             );
             painter.text(
@@ -719,7 +729,10 @@ impl LocalleafApp {
             }
         }
 
-        if output.response.has_focus() && !autocomplete_handled {
+        // Only evaluate if already open, OR if user actually typed something
+        let evaluate_autocomplete = self.active_menu.is_some() || output.response.changed();
+
+        if evaluate_autocomplete && output.response.has_focus() && !autocomplete_handled {
             if let Some(cursor_range) = output.cursor_range {
                 let c_idx = cursor_range.primary.ccursor.index;
                 if c_idx <= self.editor_text.len()
@@ -858,7 +871,6 @@ impl LocalleafApp {
             }
         }
     }
-
     fn draw_autocomplete_popup(&self, ui: &mut egui::Ui, output: &egui::text_edit::TextEditOutput) {
         if let Some((_, matches, selected_idx, _, _)) = &self.active_menu {
             if let Some(cursor_range) = output.cursor_range {
