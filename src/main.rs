@@ -36,6 +36,10 @@ pub struct LocalleafApp {
     dismissed_prefix: Option<String>,
 }
 
+// ==========================================
+// SYNTAX HIGHLIGHTERS
+// ==========================================
+
 fn highlight_latex(text: &str, font_size: f32, is_dark: bool) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     let font = egui::FontId::monospace(font_size);
@@ -248,6 +252,10 @@ fn render_dir_tree(
     clicked
 }
 
+// ==========================================
+// APPLICATION LOGIC & RENDERING
+// ==========================================
+
 impl LocalleafApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let config_path = "config_localleaf.json";
@@ -335,6 +343,8 @@ impl LocalleafApp {
         }
     }
 
+    // --- Modularized Panel Renderers ---
+
     fn render_left_panel(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("left_panel")
             .resizable(true)
@@ -361,454 +371,7 @@ impl LocalleafApp {
             });
     }
 
-    fn render_central_panel(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let editor_id = egui::Id::new("latex_editor");
-            let mut autocomplete_handled = false;
-
-            if ui.input(|i| i.modifiers.shift) {
-                self.active_menu = None;
-            }
-
-            // 1. Intercept Autocomplete Navigation
-            if let Some((prefix, matches, mut selected_idx, start, end)) = self.active_menu.clone()
-            {
-                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
-                    selected_idx = (selected_idx + 1).min(matches.len().saturating_sub(1));
-                    self.active_menu = Some((prefix, matches, selected_idx, start, end));
-                    autocomplete_handled = true;
-                } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp))
-                {
-                    selected_idx = selected_idx.saturating_sub(1);
-                    self.active_menu = Some((prefix, matches, selected_idx, start, end));
-                    autocomplete_handled = true;
-                } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
-                    || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
-                {
-                    let (_, insert_raw) = &matches[selected_idx];
-                    let mut insert_str = insert_raw.clone();
-                    let cursor_offset = if let Some(idx) = insert_str.find("$CURSOR$") {
-                        let offset = insert_str.len() - (idx + "$CURSOR$".len());
-                        insert_str = insert_str.replace("$CURSOR$", "");
-                        offset
-                    } else {
-                        0
-                    };
-
-                    self.editor_text.replace_range(start..end, &insert_str);
-                    let new_pos = start + insert_str.len() - cursor_offset;
-                    self.jump_request = Some((new_pos, new_pos));
-                    self.active_menu = None;
-                    self.dismissed_prefix = None;
-                    autocomplete_handled = true;
-                } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-                {
-                    self.dismissed_prefix = Some(prefix);
-                    self.active_menu = None;
-                    autocomplete_handled = true;
-                    ui.ctx().memory_mut(|mem| mem.request_focus(editor_id));
-                }
-            }
-
-            // 2. Toolbar
-            let mut current_selection = None;
-            if let Some(state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
-                if let Some(range) = state.cursor.char_range() {
-                    let start = range.primary.index.min(range.secondary.index);
-                    let end = range.primary.index.max(range.secondary.index);
-                    if start != end {
-                        current_selection = Some((start, end));
-                    }
-                }
-            }
-
-            ui.horizontal(|ui| {
-                if ui.button("💾 Save (Ctrl+S)").clicked() {
-                    self.save_current_file();
-                }
-                if ui.button("🚀 Build (Ctrl+B)").clicked() {
-                    self.execute_build();
-                }
-                ui.separator();
-                let theme_icon = if self.config.ui.dark_mode {
-                    "🌙 Dark"
-                } else {
-                    "☀️  Light"
-                };
-                if ui.button(theme_icon).clicked() {
-                    self.config.ui.dark_mode = !self.config.ui.dark_mode;
-                    fs::write(
-                        "config_localleaf.json",
-                        serde_json::to_string_pretty(&self.config).unwrap(),
-                    )
-                    .ok();
-                }
-                ui.separator();
-                if ui.button("A-").clicked() {
-                    self.config.editor.font_size -= 1.0;
-                }
-                if ui.button("A+").clicked() {
-                    self.config.editor.font_size += 1.0;
-                }
-                ui.separator();
-
-                // AI Button logic mapping directly to current file
-                if let Some((start, end)) = current_selection {
-                    if let Some(path) = &self.current_file {
-                        if ui
-                            .button(
-                                egui::RichText::new("🧠 Send to AI (Ctrl+I)")
-                                    .color(egui::Color32::LIGHT_GREEN),
-                            )
-                            .clicked()
-                        {
-                            let selected_str: String = self
-                                .editor_text
-                                .chars()
-                                .skip(start)
-                                .take(end - start)
-                                .collect();
-                            trigger_ai_indexing(
-                                self.config.ai.clone(),
-                                path.clone(),
-                                selected_str,
-                                start,
-                                end,
-                                self.tx_ai.clone(),
-                            );
-                            self.active_right_tab = RightTab::Index;
-                            self.is_generating = true;
-                        }
-                    } else {
-                        ui.add_enabled(false, egui::Button::new("Save file first to use AI"));
-                    }
-                } else {
-                    ui.add_enabled(false, egui::Button::new("Highlight text to index..."));
-                }
-            });
-            ui.separator();
-
-            // 3. Main Editor
-            egui::ScrollArea::both()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        let font = egui::FontId::monospace(self.config.editor.font_size);
-
-                        // line number setting
-                        let line_count = self.editor_text.lines().count().max(1);
-                        let extra_line = if self.editor_text.ends_with('\n') {
-                            1
-                        } else {
-                            0
-                        };
-                        let line_numbers = (1..=(line_count + extra_line))
-                            .map(|i| i.to_string())
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        ui.label(egui::RichText::new(line_numbers).font(font.clone()).weak());
-
-                        // color setting
-                        let font_size = self.config.editor.font_size;
-                        let is_dark = self.config.ui.dark_mode;
-                        let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
-                            let mut layout_job = highlight_latex(string, font_size, is_dark);
-                            layout_job.wrap.max_width = wrap_width;
-                            ui.fonts(|f| f.layout_job(layout_job))
-                        };
-
-                        // editor setting
-                        let output = egui::TextEdit::multiline(&mut self.editor_text)
-                            .id(editor_id)
-                            .font(font)
-                            .code_editor() // focus lock
-                            .desired_width(f32::INFINITY)
-                            .frame(false)
-                            .layouter(&mut layouter)
-                            .show(ui);
-
-                        // 4. Update Autocomplete Menu State
-                        if output.response.has_focus() && !autocomplete_handled {
-                            if let Some(cursor_range) = output.cursor_range {
-                                let c_idx = cursor_range.primary.ccursor.index;
-                                if c_idx <= self.editor_text.len() {
-                                    let text_up_to_cursor = &self.editor_text[..c_idx];
-                                    let context = detect_context(text_up_to_cursor);
-
-                                    let current_prefix = match &context {
-                                        AutocompleteContext::Macro(p)
-                                        | AutocompleteContext::Citation(p)
-                                        | AutocompleteContext::Label(p)
-                                        | AutocompleteContext::File(p) => p.clone(),
-                                        AutocompleteContext::None => String::new(),
-                                    };
-
-                                    let mut needs_update = true;
-                                    if let Some((active_prefix, _, _, _, active_end)) =
-                                        &self.active_menu
-                                    {
-                                        if active_prefix == &current_prefix && *active_end == c_idx
-                                        {
-                                            needs_update = false; // Cursor hasn't moved, do not wipe selected_idx
-                                        }
-                                    }
-
-                                    if needs_update {
-                                        match context {
-                                            AutocompleteContext::Citation(prefix) => {
-                                                let keys = self.bib_cache.get_keys(
-                                                    Path::new(&self.config.build.working_directory),
-                                                    &self.config.editor.bib_dir,
-                                                );
-                                                let matches: Vec<(String, String)> = keys
-                                                    .into_iter()
-                                                    .filter(|k| {
-                                                        k.to_lowercase()
-                                                            .contains(&prefix.to_lowercase())
-                                                    })
-                                                    .map(|k| (k.clone(), k))
-                                                    .take(8)
-                                                    .collect();
-                                                if !matches.is_empty() {
-                                                    self.active_menu = Some((
-                                                        prefix.clone(),
-                                                        matches,
-                                                        0,
-                                                        c_idx - prefix.len(),
-                                                        c_idx,
-                                                    ));
-                                                } else {
-                                                    self.active_menu = None;
-                                                }
-                                            }
-                                            AutocompleteContext::Label(prefix) => {
-                                                let keys = self.label_cache.get_labels(Path::new(
-                                                    &self.config.build.working_directory,
-                                                ));
-                                                let matches: Vec<(String, String)> = keys
-                                                    .into_iter()
-                                                    .filter(|k| {
-                                                        k.to_lowercase()
-                                                            .contains(&prefix.to_lowercase())
-                                                    })
-                                                    .map(|k| (k.clone(), k))
-                                                    .take(8)
-                                                    .collect();
-                                                if !matches.is_empty() {
-                                                    self.active_menu = Some((
-                                                        prefix.clone(),
-                                                        matches,
-                                                        0,
-                                                        c_idx - prefix.len(),
-                                                        c_idx,
-                                                    ));
-                                                } else {
-                                                    self.active_menu = None;
-                                                }
-                                            }
-
-                                            AutocompleteContext::File(prefix) => {
-                                                let files = get_file_suggestions(
-                                                    Path::new(&self.config.build.working_directory),
-                                                    &prefix,
-                                                );
-                                                let matches: Vec<(String, String)> = files
-                                                    .into_iter()
-                                                    .map(|f| (f.clone(), f))
-                                                    .take(8)
-                                                    .collect();
-                                                if !matches.is_empty() {
-                                                    self.active_menu = Some((
-                                                        prefix.clone(),
-                                                        matches,
-                                                        0,
-                                                        c_idx - prefix.len(),
-                                                        c_idx,
-                                                    ));
-                                                } else {
-                                                    self.active_menu = None;
-                                                }
-                                            }
-                                            AutocompleteContext::Macro(prefix) => {
-                                                if self.dismissed_prefix.as_ref() != Some(&prefix) {
-                                                    let mut matches: Vec<_> = self
-                                                        .config
-                                                        .editor
-                                                        .autocomplete_cmds
-                                                        .iter()
-                                                        .filter(|c| {
-                                                            c.trigger
-                                                                .to_lowercase()
-                                                                .contains(&prefix.to_lowercase())
-                                                        })
-                                                        .map(|c| {
-                                                            (c.trigger.clone(), c.insert.clone())
-                                                        })
-                                                        .collect();
-                                                    matches.sort_by(|(a, _), (b, _)| {
-                                                        let a_starts = a.starts_with(&prefix);
-                                                        let b_starts = b.starts_with(&prefix);
-                                                        if a_starts && !b_starts {
-                                                            std::cmp::Ordering::Less
-                                                        } else if !a_starts && b_starts {
-                                                            std::cmp::Ordering::Greater
-                                                        } else {
-                                                            a.cmp(b)
-                                                        }
-                                                    });
-                                                    matches.truncate(8);
-                                                    if !matches.is_empty() {
-                                                        self.active_menu = Some((
-                                                            prefix.clone(),
-                                                            matches,
-                                                            0,
-                                                            c_idx - prefix.len(),
-                                                            c_idx,
-                                                        ));
-                                                    } else {
-                                                        self.active_menu = None;
-                                                    }
-                                                }
-                                            }
-                                            AutocompleteContext::None => {
-                                                self.active_menu = None;
-                                                self.dismissed_prefix = None;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // 5. Draw the Floating Menu
-                        if let Some((_, matches, selected_idx, _, _)) = &self.active_menu {
-                            if let Some(cursor_range) = output.cursor_range {
-                                let galley = &output.galley;
-                                let pos_in_galley =
-                                    galley.pos_from_ccursor(cursor_range.primary.ccursor);
-                                let screen_pos = output.galley_pos
-                                    + pos_in_galley.min.to_vec2()
-                                    + egui::vec2(0.0, font_size * 1.5);
-
-                                egui::Area::new(egui::Id::new("autocomplete_popup"))
-                                    .fixed_pos(screen_pos)
-                                    .order(egui::Order::Tooltip)
-                                    .show(ui.ctx(), |ui| {
-                                        egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                            ui.vertical(|ui| {
-                                                for (i, (display, _)) in matches.iter().enumerate()
-                                                {
-                                                    if i == *selected_idx {
-                                                        ui.label(
-                                                            egui::RichText::new(format!(
-                                                                "▶ {}",
-                                                                display
-                                                            ))
-                                                            .color(egui::Color32::from_rgb(
-                                                                86, 182, 194,
-                                                            ))
-                                                            .strong(),
-                                                        );
-                                                    } else {
-                                                        ui.label(egui::RichText::new(format!(
-                                                            "  {}",
-                                                            display
-                                                        )));
-                                                    }
-                                                }
-                                            });
-                                        });
-                                    });
-                            }
-                        }
-
-                        if let Some((start, end)) = self.jump_request.take() {
-                            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id)
-                            {
-                                let ccursor_start = egui::text::CCursor::new(start);
-                                let ccursor_end = egui::text::CCursor::new(end);
-                                state
-                                    .cursor
-                                    .set_char_range(Some(egui::text::CCursorRange::two(
-                                        ccursor_start,
-                                        ccursor_end,
-                                    )));
-                                egui::TextEdit::store_state(ui.ctx(), editor_id, state);
-                                output.response.request_focus();
-                            }
-                        }
-                    });
-                });
-        });
-    }
-}
-
-impl eframe::App for LocalleafApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.set_visuals(if self.config.ui.dark_mode {
-            egui::Visuals::dark()
-        } else {
-            egui::Visuals::light()
-        });
-
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S)) {
-            self.save_current_file();
-        }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::B)) {
-            self.execute_build();
-        }
-        if ctx.input(|i| {
-            i.modifiers.command
-                && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
-        }) {
-            self.config.editor.font_size = (self.config.editor.font_size + 1.0).clamp(8.0, 48.0);
-        }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Minus)) {
-            self.config.editor.font_size = (self.config.editor.font_size - 1.0).clamp(8.0, 48.0);
-        }
-
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::I)) {
-            let editor_id = egui::Id::new("latex_editor");
-            if let Some(state) = egui::TextEdit::load_state(ctx, editor_id) {
-                if let Some(range) = state.cursor.char_range() {
-                    let start = range.primary.index.min(range.secondary.index);
-                    let end = range.primary.index.max(range.secondary.index);
-                    if start != end {
-                        if let Some(path) = &self.current_file {
-                            let selected_str: String = self
-                                .editor_text
-                                .chars()
-                                .skip(start)
-                                .take(end - start)
-                                .collect();
-                            trigger_ai_indexing(
-                                self.config.ai.clone(),
-                                path.clone(),
-                                selected_str,
-                                start,
-                                end,
-                                self.tx_ai.clone(),
-                            );
-                            self.active_right_tab = RightTab::Index;
-                            self.is_generating = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Ok(entry) = self.rx_ai.try_recv() {
-            if entry.ai_summary.starts_with("Error:") {
-                self.append_log(&format!("[AI] ❌ Failed: {}", entry.ai_summary));
-                self.active_right_tab = RightTab::Terminal;
-            } else {
-                self.append_log(&format!("[AI] ✅ Generated index '{}'", entry.ai_summary));
-                self.index_entries.push(entry);
-            }
-            self.is_generating = false;
-        }
-
-        self.render_left_panel(ctx);
+    fn render_right_panel(&mut self, ctx: &egui::Context) {
         egui::SidePanel::right("right_panel")
             .resizable(true)
             .default_width(self.config.ui.right_panel_width)
@@ -822,14 +385,12 @@ impl eframe::App for LocalleafApp {
                     );
                 });
                 ui.separator();
+
                 match self.active_right_tab {
                     RightTab::Index => {
-                        // 1. Create a temporary variable to hold the action
                         let mut trigger_jump = None;
-
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             for entry in &self.index_entries {
-                                // Immutable lock begins
                                 ui.group(|ui| {
                                     ui.label(
                                         egui::RichText::new(&entry.ai_summary).strong().size(15.0),
@@ -840,10 +401,10 @@ impl eframe::App for LocalleafApp {
                                         format!("\"{}\"", entry.selected_text)
                                     };
                                     ui.label(egui::RichText::new(preview).weak().italics());
+
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            // Display the timestamp
                                             ui.label(
                                                 egui::RichText::new(
                                                     entry.timestamp.format("%H:%M:%S").to_string(),
@@ -854,7 +415,6 @@ impl eframe::App for LocalleafApp {
                                     );
 
                                     if ui.button("⮐ Jump to Selection").clicked() {
-                                        // Save the intended action, but don't mutate `self` yet!
                                         trigger_jump = Some((
                                             entry.file_path.clone(),
                                             entry.start_idx,
@@ -862,10 +422,9 @@ impl eframe::App for LocalleafApp {
                                         ));
                                     }
                                 });
-                            } // Immutable lock ends here
+                            }
                         });
 
-                        // 2. Execute the mutable changes safely AFTER the loop is finished
                         if let Some((path, start, end)) = trigger_jump {
                             if self.current_file.as_ref() != Some(&path) {
                                 if let Ok(content) = fs::read_to_string(&path) {
@@ -901,6 +460,521 @@ impl eframe::App for LocalleafApp {
                     }
                 }
             });
+    }
+
+    fn render_toolbar(&mut self, ui: &mut egui::Ui, current_selection: Option<(usize, usize)>) {
+        ui.horizontal(|ui| {
+            if ui.button("💾 Save (Ctrl+S)").clicked() {
+                self.save_current_file();
+            }
+            if ui.button("🚀 Build (Ctrl+B)").clicked() {
+                self.execute_build();
+            }
+            ui.separator();
+
+            let theme_icon = if self.config.ui.dark_mode {
+                "🌙 Dark"
+            } else {
+                "☀️  Light"
+            };
+            if ui.button(theme_icon).clicked() {
+                self.config.ui.dark_mode = !self.config.ui.dark_mode;
+                fs::write(
+                    "config_localleaf.json",
+                    serde_json::to_string_pretty(&self.config).unwrap(),
+                )
+                .ok();
+            }
+            ui.separator();
+
+            if ui.button("A-").clicked() {
+                self.config.editor.font_size -= 1.0;
+            }
+            if ui.button("A+").clicked() {
+                self.config.editor.font_size += 1.0;
+            }
+            ui.separator();
+
+            // AI Index Trigger
+            let ai_triggered = ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::I));
+
+            if let Some((start, end)) = current_selection {
+                if let Some(path) = &self.current_file {
+                    if ui
+                        .button(
+                            egui::RichText::new("🧠 Send to AI (Ctrl+I)")
+                                .color(egui::Color32::LIGHT_GREEN),
+                        )
+                        .clicked()
+                        || ai_triggered
+                    {
+                        let selected_str: String = self
+                            .editor_text
+                            .chars()
+                            .skip(start)
+                            .take(end - start)
+                            .collect();
+                        trigger_ai_indexing(
+                            self.config.ai.clone(),
+                            path.clone(),
+                            selected_str,
+                            start,
+                            end,
+                            self.tx_ai.clone(),
+                        );
+                        self.active_right_tab = RightTab::Index;
+                        self.is_generating = true;
+                    }
+                } else {
+                    ui.add_enabled(false, egui::Button::new("Save file first to use AI"));
+                }
+            } else {
+                ui.add_enabled(false, egui::Button::new("Highlight text to index..."));
+            }
+        });
+        ui.separator();
+    }
+
+    fn render_editor_with_gutters(
+        &mut self,
+        ui: &mut egui::Ui,
+        editor_id: egui::Id,
+    ) -> egui::text_edit::TextEditOutput {
+        let font = egui::FontId::monospace(self.config.editor.font_size);
+        let font_size = self.config.editor.font_size;
+        let is_dark = self.config.ui.dark_mode;
+
+        // Calculate dynamic gutter width based on true line count
+        let total_lines = self.editor_text.split('\n').count();
+        let gutter_width = ui
+            .fonts(|f| {
+                f.layout_no_wrap(
+                    total_lines.to_string(),
+                    font.clone(),
+                    ui.visuals().text_color(),
+                )
+            })
+            .rect
+            .width()
+            + 15.0;
+
+        let available_rect = ui.available_rect_before_wrap();
+        let (gutter_rect, editor_rect) =
+            available_rect.split_left_right_at_x(available_rect.left() + gutter_width);
+
+        // --- BUG FIX 2: Prevent Alt+Tab Ghost Inputs ---
+        let mut window_just_focused = false;
+        ui.input(|i| {
+            for e in &i.events {
+                if let egui::Event::WindowFocused(true) = e {
+                    window_just_focused = true;
+                }
+            }
+        });
+
+        ui.input_mut(|i| {
+            i.events.retain(|e| {
+                // Discard raw \t text insertions if Alt is held or window just gained focus
+                if let egui::Event::Text(text) = e {
+                    if text == "\t" && (i.modifiers.alt || window_just_focused) {
+                        return false;
+                    }
+                }
+                // Discard physical Tab key events under the same conditions
+                if let egui::Event::Key {
+                    key: egui::Key::Tab,
+                    ..
+                } = e
+                {
+                    if i.modifiers.alt || window_just_focused {
+                        return false;
+                    }
+                }
+                true
+            });
+        });
+
+        // Render the Editor in the right rect
+        let mut editor_ui = ui.child_ui(editor_rect, *ui.layout());
+        let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
+            let mut layout_job = highlight_latex(string, font_size, is_dark);
+            layout_job.wrap.max_width = wrap_width;
+            ui.fonts(|f| f.layout_job(layout_job))
+        };
+
+        let output = egui::TextEdit::multiline(&mut self.editor_text)
+            .id(editor_id)
+            .font(font.clone())
+            .code_editor()
+            .desired_width(f32::INFINITY)
+            .frame(false)
+            .margin(egui::vec2(0.0, 0.0)) // Crucial for vertical alignment
+            .layouter(&mut layouter)
+            .show(&mut editor_ui);
+
+        // --- BUG FIX 1: Flawless Line Numbers ---
+        let painter = ui.painter_at(gutter_rect);
+        let galley = &output.galley;
+
+        let mut current_logical_line = 1;
+        let mut is_start_of_line = true; // The very first visual row is always the start of line 1
+
+        for row in &galley.rows {
+            if is_start_of_line {
+                let pos = egui::pos2(
+                    gutter_rect.right() - 5.0,
+                    output.galley_pos.y + row.rect.min.y,
+                );
+                painter.text(
+                    pos,
+                    egui::Align2::RIGHT_TOP,
+                    current_logical_line.to_string(),
+                    font.clone(),
+                    ui.visuals().weak_text_color(),
+                );
+                current_logical_line += 1;
+            }
+
+            // If this visual row ends with a newline, the NEXT visual row will be the start of a new logical line.
+            is_start_of_line = row.ends_with_newline;
+        }
+
+        // Draw final trailing newline number if the file ends with an empty line
+        if self.editor_text.ends_with('\n') {
+            let pos = egui::pos2(
+                gutter_rect.right() - 5.0,
+                output.galley_pos.y + galley.mesh_bounds.max.y,
+            );
+            painter.text(
+                pos,
+                egui::Align2::RIGHT_TOP,
+                current_logical_line.to_string(),
+                font,
+                ui.visuals().weak_text_color(),
+            );
+        }
+
+        output
+    }
+
+    fn handle_autocomplete_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        output: &egui::text_edit::TextEditOutput,
+        editor_id: egui::Id,
+    ) {
+        let mut autocomplete_handled = false;
+
+        // 1. Menu Interactions & Rotation
+        if let Some((prefix, matches, mut selected_idx, start, end)) = self.active_menu.clone() {
+            if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+                selected_idx = (selected_idx + 1) % matches.len(); // Wrap to top
+                self.active_menu = Some((prefix, matches, selected_idx, start, end));
+                autocomplete_handled = true;
+            } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+                selected_idx = if selected_idx == 0 {
+                    matches.len() - 1
+                } else {
+                    selected_idx - 1
+                }; // Wrap to bottom
+                self.active_menu = Some((prefix, matches, selected_idx, start, end));
+                autocomplete_handled = true;
+            } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+                || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+            {
+                let (_, insert_raw) = &matches[selected_idx];
+                let mut insert_str = insert_raw.clone();
+                let cursor_offset = if let Some(idx) = insert_str.find("$CURSOR$") {
+                    let offset = insert_str.len() - (idx + "$CURSOR$".len());
+                    insert_str = insert_str.replace("$CURSOR$", "");
+                    offset
+                } else {
+                    0
+                };
+
+                self.editor_text.replace_range(start..end, &insert_str);
+                let new_pos = start + insert_str.len() - cursor_offset;
+                self.jump_request = Some((new_pos, new_pos));
+                self.active_menu = None;
+                self.dismissed_prefix = None;
+                autocomplete_handled = true;
+            } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.dismissed_prefix = Some(prefix);
+                self.active_menu = None;
+                autocomplete_handled = true;
+                // Defer focus request so cursor doesn't disappear
+                ui.ctx().memory_mut(|mem| mem.request_focus(editor_id));
+            }
+        }
+
+        // 2. Check for Text Selection to cleanly dismiss menu (Fixes Shift bug)
+        if let Some(cursor_range) = output.cursor_range {
+            if cursor_range.primary.ccursor.index != cursor_range.secondary.ccursor.index {
+                self.active_menu = None;
+            }
+        }
+
+        // 3. Update Autocomplete State dynamically
+        if output.response.has_focus() && !autocomplete_handled {
+            if let Some(cursor_range) = output.cursor_range {
+                let c_idx = cursor_range.primary.ccursor.index;
+                if c_idx <= self.editor_text.len()
+                    && cursor_range.primary.ccursor.index == cursor_range.secondary.ccursor.index
+                {
+                    let text_up_to_cursor = &self.editor_text[..c_idx];
+                    let context = detect_context(text_up_to_cursor);
+
+                    let current_prefix = match &context {
+                        AutocompleteContext::Macro(p)
+                        | AutocompleteContext::Citation(p)
+                        | AutocompleteContext::Label(p)
+                        | AutocompleteContext::File(p) => p.clone(),
+                        AutocompleteContext::None => String::new(),
+                    };
+
+                    let mut needs_update = true;
+                    if let Some((active_prefix, _, _, _, active_end)) = &self.active_menu {
+                        if active_prefix == &current_prefix && *active_end == c_idx {
+                            needs_update = false;
+                        }
+                    }
+
+                    if needs_update {
+                        match context {
+                            AutocompleteContext::Citation(prefix) => {
+                                let keys = self.bib_cache.get_keys(
+                                    Path::new(&self.config.build.working_directory),
+                                    &self.config.editor.bib_dir,
+                                );
+                                let matches: Vec<(String, String)> = keys
+                                    .into_iter()
+                                    .filter(|k| k.to_lowercase().contains(&prefix.to_lowercase()))
+                                    .map(|k| (k.clone(), k))
+                                    .take(8)
+                                    .collect();
+                                if !matches.is_empty() {
+                                    self.active_menu = Some((
+                                        prefix.clone(),
+                                        matches,
+                                        0,
+                                        c_idx - prefix.len(),
+                                        c_idx,
+                                    ));
+                                } else {
+                                    self.active_menu = None;
+                                }
+                            }
+                            AutocompleteContext::Label(prefix) => {
+                                let keys = self
+                                    .label_cache
+                                    .get_labels(Path::new(&self.config.build.working_directory));
+                                let matches: Vec<(String, String)> = keys
+                                    .into_iter()
+                                    .filter(|k| k.to_lowercase().contains(&prefix.to_lowercase()))
+                                    .map(|k| (k.clone(), k))
+                                    .take(8)
+                                    .collect();
+                                if !matches.is_empty() {
+                                    self.active_menu = Some((
+                                        prefix.clone(),
+                                        matches,
+                                        0,
+                                        c_idx - prefix.len(),
+                                        c_idx,
+                                    ));
+                                } else {
+                                    self.active_menu = None;
+                                }
+                            }
+                            AutocompleteContext::File(prefix) => {
+                                let files = get_file_suggestions(
+                                    Path::new(&self.config.build.working_directory),
+                                    &prefix,
+                                );
+                                let matches: Vec<(String, String)> =
+                                    files.into_iter().map(|f| (f.clone(), f)).take(8).collect();
+                                if !matches.is_empty() {
+                                    self.active_menu = Some((
+                                        prefix.clone(),
+                                        matches,
+                                        0,
+                                        c_idx - prefix.len(),
+                                        c_idx,
+                                    ));
+                                } else {
+                                    self.active_menu = None;
+                                }
+                            }
+                            AutocompleteContext::Macro(prefix) => {
+                                if self.dismissed_prefix.as_ref() != Some(&prefix) {
+                                    let mut matches: Vec<_> = self
+                                        .config
+                                        .editor
+                                        .autocomplete_cmds
+                                        .iter()
+                                        .filter(|c| {
+                                            c.trigger
+                                                .to_lowercase()
+                                                .contains(&prefix.to_lowercase())
+                                        })
+                                        .map(|c| (c.trigger.clone(), c.insert.clone()))
+                                        .collect();
+                                    matches.sort_by(|(a, _), (b, _)| {
+                                        let a_starts = a.starts_with(&prefix);
+                                        let b_starts = b.starts_with(&prefix);
+                                        if a_starts && !b_starts {
+                                            std::cmp::Ordering::Less
+                                        } else if !a_starts && b_starts {
+                                            std::cmp::Ordering::Greater
+                                        } else {
+                                            a.cmp(b)
+                                        }
+                                    });
+                                    matches.truncate(8);
+                                    if !matches.is_empty() {
+                                        self.active_menu = Some((
+                                            prefix.clone(),
+                                            matches,
+                                            0,
+                                            c_idx - prefix.len(),
+                                            c_idx,
+                                        ));
+                                    } else {
+                                        self.active_menu = None;
+                                    }
+                                }
+                            }
+                            AutocompleteContext::None => {
+                                self.active_menu = None;
+                                self.dismissed_prefix = None;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Draw the Floating Menu
+        if let Some((_, matches, selected_idx, _, _)) = &self.active_menu {
+            if let Some(cursor_range) = output.cursor_range {
+                let galley = &output.galley;
+                let pos_in_galley = galley.pos_from_ccursor(cursor_range.primary.ccursor);
+                let screen_pos = output.galley_pos
+                    + pos_in_galley.min.to_vec2()
+                    + egui::vec2(0.0, self.config.editor.font_size * 1.5);
+
+                egui::Area::new(egui::Id::new("autocomplete_popup"))
+                    .fixed_pos(screen_pos)
+                    .order(egui::Order::Tooltip)
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.vertical(|ui| {
+                                for (i, (display, _)) in matches.iter().enumerate() {
+                                    if i == *selected_idx {
+                                        ui.label(
+                                            egui::RichText::new(format!("▶ {}", display))
+                                                .color(egui::Color32::from_rgb(86, 182, 194))
+                                                .strong(),
+                                        );
+                                    } else {
+                                        ui.label(egui::RichText::new(format!("  {}", display)));
+                                    }
+                                }
+                            });
+                        });
+                    });
+            }
+        }
+    }
+
+    fn render_central_panel(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let editor_id = egui::Id::new("latex_editor");
+
+            // Fetch Current Selection for Toolbar
+            let mut current_selection = None;
+            if let Some(state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
+                if let Some(range) = state.cursor.char_range() {
+                    let start = range.primary.index.min(range.secondary.index);
+                    let end = range.primary.index.max(range.secondary.index);
+                    if start != end {
+                        current_selection = Some((start, end));
+                    }
+                }
+            }
+
+            self.render_toolbar(ui, current_selection);
+
+            egui::ScrollArea::both()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let output = self.render_editor_with_gutters(ui, editor_id);
+                    self.handle_autocomplete_menu(ui, &output, editor_id);
+
+                    // Execute Jumps
+                    if let Some((start, end)) = self.jump_request.take() {
+                        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
+                            let ccursor_start = egui::text::CCursor::new(start);
+                            let ccursor_end = egui::text::CCursor::new(end);
+                            state
+                                .cursor
+                                .set_char_range(Some(egui::text::CCursorRange::two(
+                                    ccursor_start,
+                                    ccursor_end,
+                                )));
+                            egui::TextEdit::store_state(ui.ctx(), editor_id, state);
+                            output.response.request_focus();
+                        }
+                    }
+                });
+        });
+    }
+}
+
+// ==========================================
+// MAIN LOOP
+// ==========================================
+
+impl eframe::App for LocalleafApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.set_visuals(if self.config.ui.dark_mode {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        });
+
+        // Global Keyboard Shortcuts
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S)) {
+            self.save_current_file();
+        }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::B)) {
+            self.execute_build();
+        }
+        if ctx.input(|i| {
+            i.modifiers.command
+                && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
+        }) {
+            self.config.editor.font_size = (self.config.editor.font_size + 1.0).clamp(8.0, 48.0);
+        }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Minus)) {
+            self.config.editor.font_size = (self.config.editor.font_size - 1.0).clamp(8.0, 48.0);
+        }
+
+        // Process AI Callbacks
+        if let Ok(entry) = self.rx_ai.try_recv() {
+            if entry.ai_summary.starts_with("Error:") {
+                self.append_log(&format!("[AI] ❌ Failed: {}", entry.ai_summary));
+                self.active_right_tab = RightTab::Terminal;
+            } else {
+                self.append_log(&format!("[AI] ✅ Generated index '{}'", entry.ai_summary));
+                self.index_entries.push(entry);
+            }
+            self.is_generating = false;
+        }
+
+        // Render UI
+        self.render_left_panel(ctx);
+        self.render_right_panel(ctx);
         self.render_central_panel(ctx);
     }
 }
