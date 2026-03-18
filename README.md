@@ -1,13 +1,13 @@
 # Charcoal Slips
 
-Charcoal Slips (cclips) is a latex editor with a LLM-based grammar checking.
+Charcoal Slips (ccslips) is a latex editor with a LLM-based grammar checking.
 It targets to help the user to check the grammar for the writing.
-cclips provides the basic latex editor features, such as search-replace, syntax highlighting, and autocompletion.
-cclips allows tthe user to configure the editor features statically (need to relaunch the program).
+ccslips provides the basic latex editor features, such as search-replace, syntax highlighting, and autocompletion.
+ccslips allows tthe user to configure the editor features statically (need to relaunch the program).
 
 ## Build
 
-to build cclips, use the following commands:
+to build ccslips, use the following commands:
 
 ```
 cargo build
@@ -16,7 +16,7 @@ cp ./target/debug/ccslips <your-location>
 
 ## Configuration
 
-When you run cclips, it will generate the config file, `config_charcoal_slips.json`.
+When you run ccslips, it will generate the config file, `config_charcoal_slips.json`.
 You can modify `config_charcoal_slips.json` to change the configuration, such as color, autocomplete template, and more.
 
 ## Shortcuts
@@ -24,7 +24,7 @@ You can modify `config_charcoal_slips.json` to change the configuration, such as
 ### Editors
 
 - `Ctrl`+`S` to save
-    > Note that cclips performs auto-save when you switch to another file.
+    > Note that ccslips performs auto-save when you switch to another file.
 - `Ctrl`+`B` to save the current file and build.
     > You can customize the build command in the configuration.
 - `Ctrl`+`I` to send the selected words to LLM.
