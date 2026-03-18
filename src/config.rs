@@ -223,7 +223,7 @@ impl Default for CCslipsConfig {
                 bg_color: "#F9F9F8".into(),
                 ui_selection_bg: "#CCE3FF".into(), // Light blue for file tree
                 ui_selection_text: "#000000".into(), // Black text for readability
-                editor_selection_bg: "#A8CEFF78".into(), // Translucent for syntax highlighting
+                editor_selection_bg: "#003E8A88".into(), // Translucent for syntax highlighting
                 cursor: "#000000".into(),
                 gutter_text: "#8A8A8A".into(),
                 ai_button_bg: "#28A745".into(),

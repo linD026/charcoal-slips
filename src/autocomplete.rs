@@ -69,7 +69,6 @@ impl BibCache {
 }
 
 pub struct LabelCache {
-    // Shared structure for Bib and Label scanning
     files: HashMap<PathBuf, (SystemTime, Vec<String>)>,
 }
 
@@ -82,10 +81,8 @@ impl LabelCache {
 
     pub fn get_labels(&mut self, workspace: &Path) -> Vec<String> {
         let mut all_labels = Vec::new();
-        // Regex to find \label{anything_here}
         let re = Regex::new(r"\\label\{([^}]+)\}").unwrap();
 
-        // Recursively walk workspace for .tex files
         for entry in walkdir::WalkDir::new(workspace).into_iter().flatten() {
             let path = entry.path();
             if path.extension().unwrap_or_default() == "tex" {
@@ -138,33 +135,42 @@ pub fn get_file_suggestions(workspace: &Path, prefix: &str) -> Vec<String> {
 }
 
 pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
+    // 1. Detect environment triggers (cite, ref, input)
     if let Some(brace_idx) = text_up_to_cursor.rfind('{') {
         let text_after_brace = &text_up_to_cursor[brace_idx..];
+        
+        // Ensure we are actively typing inside the brace
         if !text_after_brace.contains('}') {
-            let before_brace = &text_up_to_cursor[..brace_idx];
-            let cmd_search_area = if let Some(bracket_start) = before_brace.rfind('[') {
-                &before_brace[..bracket_start]
-            } else {
-                before_brace
-            };
+            let before_brace = text_up_to_cursor[..brace_idx].trim_end();
+            
+            // Safely isolate the command without greedy-searching the whole file
+            let mut cmd_search_area = before_brace;
+            
+            // Only look for a '[' if the string immediately before our '{' ends with ']'
+            if cmd_search_area.ends_with(']') {
+                if let Some(bracket_start) = cmd_search_area.rfind('[') {
+                    // Safety check: ensure we didn't jump across unrelated brackets
+                    if !cmd_search_area[bracket_start..].contains('{') && !cmd_search_area[bracket_start..].contains('}') {
+                        cmd_search_area = cmd_search_area[..bracket_start].trim_end();
+                    }
+                }
+            }
 
             let mut search_term = text_up_to_cursor[brace_idx + 1..].to_string();
 
             // Check for Citation
             if cmd_search_area.ends_with("\\cite") {
-                // If there are commas, only autocomplete the segment AFTER the last comma
                 if let Some(last_comma) = search_term.rfind(',') {
                     search_term = search_term[last_comma + 1..].trim_start().to_string();
                 }
                 return AutocompleteContext::Citation(search_term);
             }
-            // Check for Labels (Standard, Cleveref, Autoref, Nameref)
+            // Check for Labels
             else if cmd_search_area.ends_with("\\ref")
                 || cmd_search_area.ends_with("\\cref")
                 || cmd_search_area.ends_with("\\autoref")
                 || cmd_search_area.ends_with("\\nameref")
             {
-                // Labels can also be comma-separated, especially in \cref
                 if let Some(last_comma) = search_term.rfind(',') {
                     search_term = search_term[last_comma + 1..].trim_start().to_string();
                 }
@@ -174,14 +180,18 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
             else if cmd_search_area.ends_with("\\includegraphics")
                 || cmd_search_area.ends_with("\\input")
             {
-                // Files are NOT split by commas.
                 return AutocompleteContext::File(search_term);
             }
         }
     }
 
-    if let Some(idx) = text_up_to_cursor.rfind('\\') {
-        let slice = &text_up_to_cursor[idx..];
+    // 2. Detect Macro triggers (e.g., typing \tex...)
+    // Restrict macro detection to the CURRENT line. 
+    // This prevents a runaway '\' from 10 lines up from crashing the context engine.
+    let current_line = text_up_to_cursor.lines().last().unwrap_or("");
+    if let Some(idx) = current_line.rfind('\\') {
+        let slice = &current_line[idx..];
+        // Ensure the user is actively typing a macro (no spaces or braces allowed yet)
         if !slice.contains(|c: char| c.is_whitespace() || c == '{' || c == '}') {
             return AutocompleteContext::Macro(slice.to_string());
         }
