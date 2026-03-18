@@ -28,6 +28,10 @@ impl BibCache {
         let mut all_keys = Vec::new();
         let full_dir = workspace.join(bib_dir);
 
+        // This Regex matches ANY BibTeX entry type (article, misc, inproceedings, etc.)
+        // It safely captures the citation key while ignoring whitespace and case.
+        let re = Regex::new(r"@(?i)[a-zA-Z]+\s*\{\s*([^,\s]+)\s*,").unwrap();
+
         if let Ok(entries) = fs::read_dir(full_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -42,21 +46,23 @@ impl BibCache {
                     };
 
                     if needs_update {
-                        let mut keys = Vec::new();
                         if let Ok(content) = fs::read_to_string(&path) {
-                            for line in content.lines() {
-                                let line = line.trim();
-                                if line.starts_with('@')
-                                    && line.contains('{')
-                                    && line.ends_with(',')
-                                {
-                                    if let Some(start) = line.find('{') {
-                                        keys.push(line[start + 1..line.len() - 1].to_string());
+                            let keys: Vec<String> = re
+                                .captures_iter(&content)
+                                .filter_map(|cap| {
+                                    let full_match = cap[0].to_lowercase();
+                                    // We don't want to autocomplete @string or @comment variables
+                                    if full_match.starts_with("@string")
+                                        || full_match.starts_with("@comment")
+                                    {
+                                        None
+                                    } else {
+                                        Some(cap[1].to_string())
                                     }
-                                }
-                            }
+                                })
+                                .collect();
+                            self.files.insert(path.clone(), (modified, keys));
                         }
-                        self.files.insert(path.clone(), (modified, keys));
                     }
                     if let Some((_, cached_keys)) = self.files.get(&path) {
                         all_keys.extend(cached_keys.clone());
@@ -161,7 +167,18 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
             let mut search_term = text_up_to_cursor[brace_idx + 1..].to_string();
 
             // Check for Citation
-            if cmd_search_area.ends_with("\\cite") {
+            if cmd_search_area.ends_with("\\cite")
+                || cmd_search_area.ends_with("\\citep")
+                || cmd_search_area.ends_with("\\citet")
+                || cmd_search_area.ends_with("\\citealt")
+                || cmd_search_area.ends_with("\\citealp")
+                || cmd_search_area.ends_with("\\citeauthor")
+                || cmd_search_area.ends_with("\\citeyear")
+                || cmd_search_area.ends_with("\\footcite")
+                || cmd_search_area.ends_with("\\textcite")
+                || cmd_search_area.ends_with("\\parencite")
+                || cmd_search_area.ends_with("\\nocite")
+            {
                 if let Some(last_comma) = search_term.rfind(',') {
                     search_term = search_term[last_comma + 1..].trim_start().to_string();
                 }
@@ -193,7 +210,7 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
     // Restrict macro detection to the CURRENT line.
     // This prevents a runaway '\' from 10 lines up from crashing the context engine.
     let current_line = text_up_to_cursor.lines().last().unwrap_or("");
-    if let Some(idx) = current_line.rfind('\\') {
+    if let (Some(idx), _) | (_, Some(idx)) = (current_line.rfind('\\'), current_line.rfind("@")) {
         let slice = &current_line[idx..];
         // Ensure the user is actively typing a macro (no spaces or braces allowed yet)
         if !slice.contains(|c: char| c.is_whitespace() || c == '{' || c == '}') {
