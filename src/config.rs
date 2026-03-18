@@ -139,7 +139,6 @@ impl Default for CCslipsConfig {
             "\\bibliography",
             "\\caption",
             "\\chapter",
-            "\\cite",
             "\\date",
             "\\label",
             "\\paragraph",
@@ -210,21 +209,134 @@ impl Default for CCslipsConfig {
             insert: format!("{}{{$CURSOR$}}", t),
         }));
 
+        let bib_cmds = [
+            // Standard
+            "\\cite",
+            "\\nocite",
+            // Natbib variations
+            "\\citep",
+            "\\citet",
+            "\\citealt",
+            "\\citealp",
+            "\\citeauthor",
+            "\\citeyear",
+            // BibLaTeX variations
+            "\\footcite",
+            "\\textcite",
+            "\\parencite",
+        ];
+
+        default_autocomplete.extend(bib_cmds.iter().map(|&cmd| AutocompleteEntry {
+            trigger: cmd.into(),
+            insert: format!("{}{{$CURSOR$}}", cmd),
+        }));
+
         let math = [
+            // Greek Letters (Lowercase)
             ("\\alpha", "\\alpha"),
             ("\\beta", "\\beta"),
             ("\\gamma", "\\gamma"),
+            ("\\delta", "\\delta"),
+            ("\\epsilon", "\\epsilon"),
+            ("\\zeta", "\\zeta"),
+            ("\\eta", "\\eta"),
+            ("\\theta", "\\theta"),
+            ("\\iota", "\\iota"),
+            ("\\kappa", "\\kappa"),
             ("\\lambda", "\\lambda"),
+            ("\\mu", "\\mu"),
+            ("\\nu", "\\nu"),
+            ("\\xi", "\\xi"),
+            ("\\pi", "\\pi"),
+            ("\\rho", "\\rho"),
+            ("\\sigma", "\\sigma"),
+            ("\\tau", "\\tau"),
+            ("\\upsilon", "\\upsilon"),
+            ("\\phi", "\\phi"),
+            ("\\chi", "\\chi"),
+            ("\\psi", "\\psi"),
+            ("\\omega", "\\omega"),
+            // Greek Letters (Uppercase)
+            ("\\Gamma", "\\Gamma"),
+            ("\\Delta", "\\Delta"),
+            ("\\Theta", "\\Theta"),
+            ("\\Lambda", "\\Lambda"),
+            ("\\Xi", "\\Xi"),
+            ("\\Pi", "\\Pi"),
+            ("\\Sigma", "\\Sigma"),
+            ("\\Upsilon", "\\Upsilon"),
+            ("\\Phi", "\\Phi"),
+            ("\\Psi", "\\Psi"),
+            ("\\Omega", "\\Omega"),
+            // Math Operations & Symbols
+            ("\\times", "\\times"),
+            ("\\div", "\\div"),
+            ("\\pm", "\\pm"),
+            ("\\mp", "\\mp"),
+            ("\\cdot", "\\cdot"),
+            ("\\circ", "\\circ"),
             ("\\infty", "\\infty"),
-            ("\\sum", "\\sum"),
-            ("\\sqrt", "\\sqrt{$CURSOR$}"),
-            ("\\frac", "\\frac{$CURSOR$}{}"),
-            ("\\[", "\\[\n    $CURSOR$\n\\]"),
+            ("\\approx", "\\approx"),
+            ("\\neq", "\\neq"),
+            ("\\leq", "\\leq"),
+            ("\\geq", "\\geq"),
+            ("\\equiv", "\\equiv"),
+            ("\\sim", "\\sim"),
+            ("\\simeq", "\\simeq"),
+            // Arrows
+            ("\\rightarrow", "\\rightarrow"),
+            ("\\leftarrow", "\\leftarrow"),
+            ("\\Rightarrow", "\\Rightarrow"),
+            ("\\Leftarrow", "\\Leftarrow"),
+            ("\\leftrightarrow", "\\leftrightarrow"),
+            ("\\Leftrightarrow", "\\Leftrightarrow"),
+            // Calculus & Sets
+            ("\\int", "\\int_{$CURSOR$}^{}"),
+            ("\\iint", "\\iint"),
+            ("\\oint", "\\oint"),
+            ("\\partial", "\\partial"),
+            ("\\nabla", "\\nabla"),
+            ("\\prod", "\\prod_{$CURSOR$}^{}"),
+            ("\\in", "\\in"),
+            ("\\notin", "\\notin"),
+            ("\\subset", "\\subset"),
+            ("\\cup", "\\cup"),
+            ("\\cap", "\\cap"),
+            ("\\emptyset", "\\emptyset"),
+            // Functions
+            ("\\sin", "\\sin"),
+            ("\\cos", "\\cos"),
+            ("\\tan", "\\tan"),
+            ("\\ln", "\\ln"),
+            ("\\log", "\\log"),
+            ("\\exp", "\\exp"),
+            // Matrices and Complex Environments
             (
-                "\\begin{equation}",
-                "\\begin{equation}\n    $CURSOR$\n\\end{equation}",
+                "\\begin{pmatrix}",
+                "\\begin{pmatrix}\n    $CURSOR$\n\\end{pmatrix}",
+            ),
+            (
+                "\\begin{bmatrix}",
+                "\\begin{bmatrix}\n    $CURSOR$\n\\end{bmatrix}",
+            ),
+            (
+                "\\begin{vmatrix}",
+                "\\begin{vmatrix}\n    $CURSOR$\n\\end{vmatrix}",
+            ),
+            (
+                "\\begin{cases}",
+                "\\begin{cases}\n    $CURSOR$ & \\text{if } \\\\\n    & \\text{otherwise}\n\\end{cases}",
+            ),
+            (
+                "\\begin{align}",
+                "\\begin{align}\n    $CURSOR$\n\\end{align}",
+            ),
+            (
+                "\\begin{align*}",
+                "\\begin{align*}\n    $CURSOR$\n\\end{align*}",
             ),
         ];
+
         default_autocomplete.extend(math.iter().map(|&(t, i)| AutocompleteEntry {
             trigger: t.into(),
             insert: i.into(),
@@ -258,6 +370,15 @@ impl Default for CCslipsConfig {
             ),
         ];
         default_autocomplete.extend(envs.iter().map(|&(t, i)| AutocompleteEntry {
+            trigger: t.into(),
+            insert: i.into(),
+        }));
+
+        let bib_types = [(
+            "@misc",
+            "@misc{$CURSOR$,\n    author = {},\n    key = {},\n    title = {},\n    year = {},\n    note = {}\n}",
+        )];
+        default_autocomplete.extend(bib_types.iter().map(|&(t, i)| AutocompleteEntry {
             trigger: t.into(),
             insert: i.into(),
         }));
