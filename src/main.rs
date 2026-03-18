@@ -1018,6 +1018,7 @@ impl eframe::App for CCslipsApp {
             self.config.editor.font_size = (self.config.editor.font_size - 1.0).clamp(8.0, 48.0);
         }
         // Find/Replace Shortcuts
+        // The Ctrl+R shortcut to focus Replace is handled inside `render_search_replace_panel`
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
             self.search_state.is_active = true;
             self.search_state.focus_find = true;
@@ -1040,7 +1041,17 @@ impl eframe::App for CCslipsApp {
             }
         }
 
-        // The Ctrl+R shortcut to focus Replace is handled inside `render_search_replace_panel`
+        // Safety Lock: We check `self.active_menu.is_none()` so we don't accidentally
+        // close the Search panel when you are just trying to dismiss the Autocomplete popup!
+        if self.search_state.is_active && self.active_menu.is_none() {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.search_state.is_active = false;
+                self.search_state.matches.clear();
+
+                // Instantly snap the keyboard focus back to the main text editor
+                ctx.memory_mut(|mem| mem.request_focus(egui::Id::new("latex_editor")));
+            }
+        }
 
         // Process AI Callbacks
         if let Ok(entry) = self.rx_ai.try_recv() {

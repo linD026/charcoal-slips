@@ -208,7 +208,7 @@ impl CCslipsApp {
         let replace_with = &self.search_state.replace_query;
 
         if self.search_state.search_all_files {
-            // BUG FIX: Force a save to disk before global replace so we don't miss unsaved memory edits
+            // Force a save to disk before global replace so we don't miss unsaved memory edits
             if let Some(path) = &self.current_file {
                 let _ = fs::write(path, &self.editor_text);
             }
@@ -315,7 +315,7 @@ impl CCslipsApp {
                     !self.search_state.query_modified && !self.search_state.matches.is_empty();
 
                 if ui
-                    .add_enabled(navigation_enabled, egui::Button::new("↑"))
+                    .add_enabled(navigation_enabled, egui::Button::new("△"))
                     .on_hover_text("Previous")
                     .clicked()
                 {
@@ -332,7 +332,7 @@ impl CCslipsApp {
                 ui.label(match_text);
 
                 if ui
-                    .add_enabled(navigation_enabled, egui::Button::new("↓"))
+                    .add_enabled(navigation_enabled, egui::Button::new("▽"))
                     .on_hover_text("Next")
                     .clicked()
                 {
