@@ -10,7 +10,7 @@ pub struct IndexEntry {
     pub ai_summary: String,
     pub start_idx: usize,
     pub end_idx: usize,
-    pub timestamp: DateTime<Local>, // NEW: Added timestamp
+    pub timestamp: DateTime<Local>, // Added timestamp
 }
 
 pub fn trigger_ai_indexing(
@@ -52,7 +52,7 @@ pub fn trigger_ai_indexing(
             ai_summary: summary.trim().to_string(),
             start_idx: start,
             end_idx: end,
-            timestamp: Local::now(), // NEW: Capture current time
+            timestamp: Local::now(), // Capture current time
         });
     });
 }

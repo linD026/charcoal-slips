@@ -57,7 +57,7 @@ impl CCslipsApp {
             for entry in sorted_entries {
                 let path = entry.path();
                 if path.is_file() && !path.to_string_lossy().contains(".git") {
-                    // BUG FIX: Use the live memory buffer if this is the currently open file!
+                    // Use the live memory buffer if this is the currently open file!
                     let content = if current_path.as_ref() == Some(&path.to_path_buf()) {
                         self.editor_text.clone()
                     } else {

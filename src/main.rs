@@ -849,7 +849,7 @@ impl CCslipsApp {
             let highlight_color = parse_hex(&theme.ui.popup_selected_text);
 
             if let Some(cursor_range) = output.cursor_range {
-                // FIX: Restored the actual geometry math so the popup tracks the cursor
+                // Restored the actual geometry math so the popup tracks the cursor
                 let galley = &output.galley;
                 let pos_in_galley = galley.pos_from_ccursor(cursor_range.primary.ccursor);
                 let screen_pos = output.galley_pos
