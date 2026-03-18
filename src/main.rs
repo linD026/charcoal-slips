@@ -1,44 +1,46 @@
 mod ai;
 mod autocomplete;
 mod config;
+mod search_replace;
 mod syntax_highlights;
 
 use ai::*;
 use autocomplete::*;
 use config::*;
-use syntax_highlights::*;
 use eframe::egui;
+use search_replace::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use syntax_highlights::*;
 
 #[derive(PartialEq)]
-enum RightTab {
+pub enum RightTab {
     Index,
     Terminal,
 }
 
 pub struct CCslipsApp {
-    config: CCslipsConfig,
-    current_file: Option<PathBuf>,
-    editor_text: String,
-    terminal_log: String,
-    active_right_tab: RightTab,
-    index_entries: Vec<IndexEntry>,
-    tx_ai: Sender<IndexEntry>,
-    rx_ai: Receiver<IndexEntry>,
-    is_generating: bool,
-    jump_request: Option<(usize, usize)>,
+    pub config: CCslipsConfig,
+    pub current_file: Option<PathBuf>,
+    pub editor_text: String,
+    pub terminal_log: String,
+    pub active_right_tab: RightTab,
+    pub index_entries: Vec<IndexEntry>,
+    pub tx_ai: Sender<IndexEntry>,
+    pub rx_ai: Receiver<IndexEntry>,
+    pub is_generating: bool,
+    pub jump_request: Option<(usize, usize)>,
 
-    bib_cache: BibCache,
-    label_cache: LabelCache,
+    pub bib_cache: BibCache,
+    pub label_cache: LabelCache,
     // (prefix, formatted_display, insert_string, selected_index, start_idx, end_idx)
-    active_menu: Option<(String, Vec<(String, String)>, usize, usize, usize)>,
-    dismissed_prefix: Option<String>,
+    pub active_menu: Option<(String, Vec<(String, String)>, usize, usize, usize)>,
+    pub dismissed_prefix: Option<String>,
+
+    pub search_state: SearchState,
 }
-
-
 
 fn render_dir_tree(
     ui: &mut egui::Ui,
@@ -134,6 +136,7 @@ impl CCslipsApp {
             dismissed_prefix: None,
             bib_cache: BibCache::new(),
             label_cache: LabelCache::new(),
+            search_state: SearchState::default(),
         };
         app.append_log("[SYSTEM] Charcoal Slips Editor Initialized.");
         app
@@ -199,27 +202,42 @@ impl CCslipsApp {
             .show(ctx, |ui| {
                 ui.heading("Workspace");
                 ui.separator();
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if let Some(clicked_path) = render_dir_tree(
-                        ui,
-                        Path::new(&self.config.build.working_directory),
-                        &self.current_file,
-                    ) {
-                        if self.current_file.as_ref() != Some(&clicked_path) {
-                            if self.current_file.is_some() {
-                                self.save_current_file();
-                            }
 
-                            if let Ok(content) = fs::read_to_string(&clicked_path) {
-                                self.editor_text = content;
-                                self.current_file = Some(clicked_path.clone());
-                                self.append_log(&format!(
-                                    "[FILE] 📂 Opened: {}",
-                                    clicked_path.display()
-                                ));
+                // 1. Lock the Search/Replace panel to the bottom if active
+                if self.search_state.is_active {
+                    egui::TopBottomPanel::bottom("search_replace_panel")
+                        .resizable(false)
+                        .show_inside(ui, |ui| {
+                            ui.add_space(4.0);
+                            self.render_search_replace_panel(ui);
+                            ui.add_space(4.0);
+                        });
+                }
+
+                // 2. The Directory Tree automatically takes up all remaining space in the middle
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        if let Some(clicked_path) = render_dir_tree(
+                            ui,
+                            Path::new(&self.config.build.working_directory),
+                            &self.current_file,
+                        ) {
+                            if self.current_file.as_ref() != Some(&clicked_path) {
+                                if self.current_file.is_some() {
+                                    self.save_current_file();
+                                }
+
+                                if let Ok(content) = fs::read_to_string(&clicked_path) {
+                                    self.editor_text = content;
+                                    self.current_file = Some(clicked_path.clone());
+                                    self.append_log(&format!(
+                                        "[FILE] 📂 Opened: {}",
+                                        clicked_path.display()
+                                    ));
+                                }
                             }
                         }
-                    }
+                    });
                 });
             });
     }
@@ -519,6 +537,64 @@ impl CCslipsApp {
         output
     }
 
+    fn render_highlight_matches(
+        &mut self,
+        ui: &mut egui::Ui,
+        output: &egui::text_edit::TextEditOutput,
+    ) {
+        // If user manually types/deletes while search bar is open, silently update indices.
+        // But DO NOT do this if the Find query itself is in a modified/unsearched state!
+        if output.response.changed()
+            && self.search_state.is_active
+            && !self.search_state.query_modified
+        {
+            self.perform_search(true, false);
+        }
+
+        // Search and replace - Highlight Matches
+        if self.search_state.is_active && !self.search_state.find_query.is_empty() {
+            let is_dark = self.config.ui.dark_mode;
+            let current_file_path = self.current_file.clone().unwrap_or_default();
+            let painter = ui.painter();
+
+            for (i, match_item) in self.search_state.matches.iter().enumerate() {
+                if match_item.file == current_file_path {
+                    let is_current = i == self.search_state.current_match_idx;
+
+                    let color = if is_dark {
+                        if is_current {
+                            egui::Color32::from_rgba_unmultiplied(255, 165, 0, 150)
+                        }
+                        // Bright Orange
+                        else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 0, 50)
+                        } // Faint Yellow
+                    } else {
+                        if is_current {
+                            egui::Color32::from_rgba_unmultiplied(255, 140, 0, 180)
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 0, 100)
+                        }
+                    };
+
+                    // Ask the text engine for the physical coordinates of the match
+                    let start_pos = output
+                        .galley
+                        .pos_from_ccursor(egui::text::CCursor::new(match_item.start));
+                    let end_pos = output
+                        .galley
+                        .pos_from_ccursor(egui::text::CCursor::new(match_item.end));
+
+                    let rect = egui::Rect::from_min_max(
+                        output.galley_pos + start_pos.min.to_vec2(),
+                        output.galley_pos + end_pos.max.to_vec2(),
+                    );
+                    painter.rect_filled(rect, 2.0, color);
+                }
+            }
+        }
+    }
+
     fn intercept_autocomplete_navigation(
         &mut self,
         ui: &mut egui::Ui,
@@ -793,6 +869,8 @@ impl CCslipsApp {
                     // remaining keyboard inputs
                     let output = self.render_editor_with_gutters(ui, editor_id);
 
+                    self.render_highlight_matches(ui, &output);
+
                     // 3. Update Autocomplete State
                     // Check if the user's typing triggered
                     // a new macro/citation/file lookup
@@ -816,6 +894,11 @@ impl CCslipsApp {
                                 )));
                             egui::TextEdit::store_state(ui.ctx(), editor_id, state);
                             output.response.request_focus();
+
+                            // Grab the physical rectangle of the text cursor and tell the camera to pan to it, dead center.
+                            let pos = output.galley.pos_from_ccursor(ccursor_start);
+                            let rect = pos.translate(output.galley_pos.to_vec2());
+                            ui.scroll_to_rect(rect, Some(egui::Align::Center));
                         }
                     }
                 });
@@ -851,6 +934,30 @@ impl eframe::App for CCslipsApp {
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Minus)) {
             self.config.editor.font_size = (self.config.editor.font_size - 1.0).clamp(8.0, 48.0);
         }
+        // Find/Replace Shortcuts
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
+            self.search_state.is_active = true;
+            self.search_state.focus_find = true;
+
+            let editor_id = egui::Id::new("latex_editor");
+            if let Some(state) = egui::TextEdit::load_state(ctx, editor_id) {
+                if let Some(range) = state.cursor.char_range() {
+                    let start = range.primary.index.min(range.secondary.index);
+                    let end = range.primary.index.max(range.secondary.index);
+                    if start != end {
+                        self.search_state.find_query = self
+                            .editor_text
+                            .chars()
+                            .skip(start)
+                            .take(end - start)
+                            .collect();
+                        self.perform_search(false, true); // No proximity required, jump camera
+                    }
+                }
+            }
+        }
+
+        // The Ctrl+R shortcut to focus Replace is handled inside `render_search_replace_panel`
 
         // Process AI Callbacks
         if let Ok(entry) = self.rx_ai.try_recv() {
