@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::PathBuf;
 
-// --- NEW: Hex Parsing Utility ---
+// --- Hex Parsing Utility ---
 pub fn parse_hex(hex: &str) -> egui::Color32 {
     let hex = hex.trim_start_matches('#');
-    let safe_default = egui::Color32::from_rgb(255, 0, 255); // Hot Pink fallback for errors
+    let safe_default = egui::Color32::from_rgb(255, 0, 255); // Magenta fallback for errors
 
     if hex.len() == 6 {
         if let Ok(rgb) = u32::from_str_radix(hex, 16) {
@@ -21,7 +21,6 @@ pub fn parse_hex(hex: &str) -> egui::Color32 {
             let g = ((rgba >> 16) & 0xFF) as u8;
             let b = ((rgba >> 8) & 0xFF) as u8;
             let a = (rgba & 0xFF) as u8;
-            // Crucial: Use unmultiplied so it acts like a physical highlighter
             return egui::Color32::from_rgba_unmultiplied(r, g, b, a);
         }
     }
@@ -33,14 +32,19 @@ pub fn parse_hex(hex: &str) -> egui::Color32 {
     safe_default
 }
 
-// --- NEW: Theme Structures ---
+// --- Theme Structures ---
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UiTheme {
-    pub bg_color: String, // Covers both panel and editor for seamless look
-    pub selection_bg: String,
+    pub bg_color: String,
+    pub ui_selection_bg: String,
+    pub ui_selection_text: String,
+    pub editor_selection_bg: String,
     pub cursor: String,
-    pub ai_button_bg: String,   // Solid button background
-    pub ai_button_text: String, // Solid button text
+    pub gutter_text: String,
+    pub ai_button_bg: String,
+    pub ai_button_text: String,
+    pub popup_bg: String,
+    pub popup_selected_text: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -108,8 +112,8 @@ pub struct UiConfig {
     pub left_panel_width: f32,
     pub right_panel_width: f32,
     pub dark_mode: bool,
-    pub light_theme: ThemeConfig, // NEW
-    pub dark_theme: ThemeConfig,  // NEW
+    pub light_theme: ThemeConfig,
+    pub dark_theme: ThemeConfig,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -128,7 +132,6 @@ impl Default for CCslipsConfig {
             .to_string();
 
         let mut default_autocomplete = Vec::new();
-        // ... [KEEP ALL YOUR EXISTING AUTOCOMPLETE SETUP EXACTLY THE SAME] ...
         let brace_cmds = [
             "\\author",
             "\\bibliography",
@@ -215,14 +218,18 @@ impl Default for CCslipsConfig {
             insert: i.into(),
         }));
 
-        // --- NEW: Default Light Theme (Overleaf / Apple Style) ---
         let default_light_theme = ThemeConfig {
             ui: UiTheme {
-                bg_color: "#F9F9F8".into(),       // Seamless warm white
-                selection_bg: "#A8CEFF78".into(), // Translucent Apple Blue
+                bg_color: "#F9F9F8".into(),
+                ui_selection_bg: "#CCE3FF".into(), // Light blue for file tree
+                ui_selection_text: "#000000".into(), // Black text for readability
+                editor_selection_bg: "#A8CEFF78".into(), // Translucent for syntax highlighting
                 cursor: "#000000".into(),
-                ai_button_bg: "#28A745".into(), // Solid GitHub Green
+                gutter_text: "#8A8A8A".into(),
+                ai_button_bg: "#28A745".into(),
                 ai_button_text: "#FFFFFF".into(),
+                popup_bg: "#F9F9F8".into(),
+                popup_selected_text: "#005CC5".into(),
             },
             syntax: SyntaxTheme {
                 normal: "#24292E".into(),
@@ -232,8 +239,8 @@ impl Default for CCslipsConfig {
                 math: "#6F42C1".into(),
             },
             search: SearchTheme {
-                match_bg: "#FFD70064".into(),         // Translucent Yellow
-                current_match_bg: "#FF8C00B4".into(), // Translucent Dark Orange
+                match_bg: "#FFD70064".into(),
+                current_match_bg: "#FF8C00B4".into(),
             },
             terminal: TerminalTheme {
                 success: "#116329".into(),
@@ -244,14 +251,18 @@ impl Default for CCslipsConfig {
             },
         };
 
-        // --- NEW: Default Dark Theme (VS Code Style) ---
         let default_dark_theme = ThemeConfig {
             ui: UiTheme {
-                bg_color: "#1E1E1E".into(),     // Seamless Dark Gray
-                selection_bg: "#264F78".into(), // VS Code dark selection
+                bg_color: "#1E1E1E".into(),
+                ui_selection_bg: "#37373D".into(), // Distinct gray/blue for file tree
+                ui_selection_text: "#FFFFFF".into(), // White text for readability
+                editor_selection_bg: "#264F7878".into(), // Translucent for syntax highlighting
                 cursor: "#FFFFFF".into(),
+                gutter_text: "#858585".into(),
                 ai_button_bg: "#2EA043".into(),
                 ai_button_text: "#FFFFFF".into(),
+                popup_bg: "#303030".into(),
+                popup_selected_text: "#56B6C2".into(),
             },
             syntax: SyntaxTheme {
                 normal: "#D4D4D4".into(),
@@ -261,8 +272,8 @@ impl Default for CCslipsConfig {
                 math: "#C678DD".into(),
             },
             search: SearchTheme {
-                match_bg: "#FFFF0032".into(),         // Faint Yellow
-                current_match_bg: "#FFA50096".into(), // Orange
+                match_bg: "#FFFF0032".into(),
+                current_match_bg: "#FFA50096".into(),
             },
             terminal: TerminalTheme {
                 success: "#98C379".into(),

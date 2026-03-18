@@ -9,7 +9,6 @@ pub fn highlight_latex(text: &str, font_size: f32, theme: &SyntaxTheme) -> egui:
     let mut job = egui::text::LayoutJob::default();
     let font = egui::FontId::monospace(font_size);
 
-    // Parse dynamic colors from JSON Hex strings
     let c_norm = parse_hex(&theme.normal);
     let c_cmd = parse_hex(&theme.command);
     let c_comment = parse_hex(&theme.comment);
@@ -110,7 +109,6 @@ pub fn highlight_logs(text: &str, font_size: f32, theme: &TerminalTheme) -> egui
     let mut job = egui::text::LayoutJob::default();
     let font = egui::FontId::monospace(font_size);
 
-    // Parse dynamic colors
     let c_success = parse_hex(&theme.success);
     let c_error = parse_hex(&theme.error);
     let c_info = parse_hex(&theme.info);

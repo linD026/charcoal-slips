@@ -251,12 +251,26 @@ impl CCslipsApp {
             .default_width(self.config.ui.right_panel_width)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.active_right_tab, RightTab::Index, "🧠 AI Index");
-                    ui.selectable_value(
-                        &mut self.active_right_tab,
-                        RightTab::Terminal,
-                        "💻 Terminal",
-                    );
+                    let is_index = self.active_right_tab == RightTab::Index;
+                    let is_term = self.active_right_tab == RightTab::Terminal;
+
+                    let index_text = if is_index {
+                        egui::RichText::new("🧠 AI Index").strong()
+                    } else {
+                        egui::RichText::new("🧠 AI Index").weak()
+                    };
+                    if ui.add(egui::Button::new(index_text).frame(false)).clicked() {
+                        self.active_right_tab = RightTab::Index;
+                    }
+
+                    let term_text = if is_term {
+                        egui::RichText::new("💻 Terminal").strong()
+                    } else {
+                        egui::RichText::new("💻 Terminal").weak()
+                    };
+                    if ui.add(egui::Button::new(term_text).frame(false)).clicked() {
+                        self.active_right_tab = RightTab::Terminal;
+                    }
                 });
                 ui.separator();
 
@@ -318,16 +332,16 @@ impl CCslipsApp {
                         }
                     }
                     RightTab::Terminal => {
+                        // Extract terminal_theme here safely
+                        let terminal_theme = if self.config.ui.dark_mode {
+                            self.config.ui.dark_theme.terminal.clone()
+                        } else {
+                            self.config.ui.light_theme.terminal.clone()
+                        };
+
                         egui::ScrollArea::both()
                             .stick_to_bottom(true)
                             .show(ui, |ui| {
-                                let theme = if self.config.ui.dark_mode {
-                                    &self.config.ui.dark_theme
-                                } else {
-                                    &self.config.ui.light_theme
-                                };
-                                let terminal_theme = theme.terminal.clone();
-
                                 let mut layouter =
                                     move |ui: &egui::Ui, string: &str, wrap_width: f32| {
                                         let mut job = highlight_logs(string, 12.0, &terminal_theme);
@@ -345,9 +359,8 @@ impl CCslipsApp {
                 }
             });
     }
-
     fn render_toolbar(&mut self, ui: &mut egui::Ui, current_selection: Option<(usize, usize)>) {
-        // FIX: Extract and clone the specific strings we need *before* the closure.
+        // Extract and clone the specific strings we need *before* the closure.
         // This drops the immutable borrow on `self`, keeping the borrow checker perfectly happy.
         let (ai_bg_hex, ai_fg_hex) = if self.config.ui.dark_mode {
             (
@@ -441,16 +454,28 @@ impl CCslipsApp {
         let font = egui::FontId::monospace(self.config.editor.font_size);
         let font_size = self.config.editor.font_size;
 
-        // Grab the current theme
-        let theme = if self.config.ui.dark_mode {
-            &self.config.ui.dark_theme
+        // Extract these values upfront to drop the borrow on `self.config`
+        // This prevents E0502 when we mutably borrow `self.editor_text` below.
+        let (syntax_theme, gutter_color, editor_selection_bg) = if self.config.ui.dark_mode {
+            (
+                self.config.ui.dark_theme.syntax.clone(),
+                parse_hex(&self.config.ui.dark_theme.ui.gutter_text),
+                parse_hex(&self.config.ui.dark_theme.ui.editor_selection_bg),
+            )
         } else {
-            &self.config.ui.light_theme
+            (
+                self.config.ui.light_theme.syntax.clone(),
+                parse_hex(&self.config.ui.light_theme.ui.gutter_text),
+                parse_hex(&self.config.ui.light_theme.ui.editor_selection_bg),
+            )
         };
-        let syntax_theme = theme.syntax.clone();
+
+        // Scope mutation: Override visuals exclusively for the text editor.
+        // This brings back the translucent highlighting without breaking the file tree!
+        ui.visuals_mut().selection.bg_fill = editor_selection_bg;
+        ui.visuals_mut().selection.stroke.color = egui::Color32::TRANSPARENT;
 
         let mut layouter = move |ui: &egui::Ui, string: &str, wrap_width: f32| {
-            // Pass the syntax theme to our parser
             let mut layout_job = highlight_latex(string, font_size, &syntax_theme);
             layout_job.wrap.max_width = wrap_width;
             ui.fonts(|f| f.layout_job(layout_job))
@@ -500,10 +525,9 @@ impl CCslipsApp {
             .width()
             + 15.0;
 
-        // Render the Editor cleanly using standard layout to fix the scroll bug
         let output = ui
             .horizontal_top(|ui| {
-                ui.add_space(gutter_width); // Push editor to the right to make room for numbers
+                ui.add_space(gutter_width);
 
                 egui::TextEdit::multiline(&mut self.editor_text)
                     .id(editor_id)
@@ -511,42 +535,39 @@ impl CCslipsApp {
                     .code_editor()
                     .desired_width(f32::INFINITY)
                     .frame(false)
-                    .margin(egui::vec2(0.0, 0.0)) // Crucial for vertical alignment
+                    .margin(egui::vec2(0.0, 0.0))
                     .layouter(&mut layouter)
                     .show(ui)
             })
             .inner;
 
-        // --- THE STRAIGHTFORWARD PADDING ---
-        // Blindly add 40 lines of space to the bottom of the ScrollArea
         let padding_height = font_size * 1.5 * 40.0;
         ui.add_space(padding_height);
 
-        // Flawless Line Numbers
         let painter = ui.painter();
         let galley = &output.galley;
 
         let mut current_logical_line = 1;
-        let mut is_start_of_line = true; // The very first visual row is always the start of line 1
+        let mut is_start_of_line = true;
 
         for row in &galley.rows {
             if is_start_of_line {
-                // Paint the number relative to the top-left of the text's galley
                 let pos = egui::pos2(
                     output.galley_pos.x - 10.0,
                     output.galley_pos.y + row.rect.min.y,
                 );
+                // Paint the number relative to the top-left of the text's galley
                 painter.text(
                     pos,
                     egui::Align2::RIGHT_TOP,
                     current_logical_line.to_string(),
                     font.clone(),
-                    ui.visuals().weak_text_color(),
+                    gutter_color, // Linked to JSON Theme
                 );
                 current_logical_line += 1;
             }
-
-            // If this visual row ends with a newline, the NEXT visual row will be the start of a new logical line.
+            // If this visual row ends with a newline, the NEXT visual row will be the start of a
+            // new logical line.
             is_start_of_line = row.ends_with_newline;
         }
 
@@ -561,13 +582,12 @@ impl CCslipsApp {
                 egui::Align2::RIGHT_TOP,
                 current_logical_line.to_string(),
                 font,
-                ui.visuals().weak_text_color(),
+                gutter_color, // Linked to JSON Theme
             );
         }
 
         output
     }
-
     fn render_highlight_matches(
         &mut self,
         ui: &mut egui::Ui,
@@ -819,7 +839,17 @@ impl CCslipsApp {
     }
     fn draw_autocomplete_popup(&self, ui: &mut egui::Ui, output: &egui::text_edit::TextEditOutput) {
         if let Some((_, matches, selected_idx, _, _)) = &self.active_menu {
+            let theme = if self.config.ui.dark_mode {
+                &self.config.ui.dark_theme
+            } else {
+                &self.config.ui.light_theme
+            };
+
+            let bg_color = parse_hex(&theme.ui.popup_bg);
+            let highlight_color = parse_hex(&theme.ui.popup_selected_text);
+
             if let Some(cursor_range) = output.cursor_range {
+                // FIX: Restored the actual geometry math so the popup tracks the cursor
                 let galley = &output.galley;
                 let pos_in_galley = galley.pos_from_ccursor(cursor_range.primary.ccursor);
                 let screen_pos = output.galley_pos
@@ -830,21 +860,24 @@ impl CCslipsApp {
                     .fixed_pos(screen_pos)
                     .order(egui::Order::Tooltip)
                     .show(ui.ctx(), |ui| {
-                        egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.vertical(|ui| {
-                                for (i, (display, _)) in matches.iter().enumerate() {
-                                    if i == *selected_idx {
-                                        ui.label(
-                                            egui::RichText::new(format!("▶ {}", display))
-                                                .color(egui::Color32::from_rgb(86, 182, 194))
-                                                .strong(),
-                                        );
-                                    } else {
-                                        ui.label(egui::RichText::new(format!("  {}", display)));
+                        // Use our custom background frame
+                        egui::Frame::popup(ui.style())
+                            .fill(bg_color)
+                            .show(ui, |ui| {
+                                ui.vertical(|ui| {
+                                    for (i, (display, _)) in matches.iter().enumerate() {
+                                        if i == *selected_idx {
+                                            ui.label(
+                                                egui::RichText::new(format!("▶ {}", display))
+                                                    .color(highlight_color)
+                                                    .strong(),
+                                            );
+                                        } else {
+                                            ui.label(egui::RichText::new(format!("  {}", display)));
+                                        }
                                     }
-                                }
+                                });
                             });
-                        });
                     });
             }
         }
@@ -930,29 +963,41 @@ impl CCslipsApp {
 
 impl eframe::App for CCslipsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 1. Fetch the active theme from our JSON config
-        let theme = if self.config.ui.dark_mode {
-            &self.config.ui.dark_theme
-        } else {
-            &self.config.ui.light_theme
-        };
+        // Safely parse colors directly, releasing the lock on `self.config`
+        // Extract both UI and Editor specific selection colors
+        let (bg_color, ui_selection_bg, ui_selection_text, cursor_color) =
+            if self.config.ui.dark_mode {
+                let t = &self.config.ui.dark_theme.ui;
+                (
+                    parse_hex(&t.bg_color),
+                    parse_hex(&t.ui_selection_bg),
+                    parse_hex(&t.ui_selection_text),
+                    parse_hex(&t.cursor),
+                )
+            } else {
+                let t = &self.config.ui.light_theme.ui;
+                (
+                    parse_hex(&t.bg_color),
+                    parse_hex(&t.ui_selection_bg),
+                    parse_hex(&t.ui_selection_text),
+                    parse_hex(&t.cursor),
+                )
+            };
 
-        // 2. Build the dynamic visuals
         let mut visuals = if self.config.ui.dark_mode {
             egui::Visuals::dark()
         } else {
             egui::Visuals::light()
         };
 
-        // 3. Apply the seamless background and custom cursor/selection
-        let bg_color = parse_hex(&theme.ui.bg_color);
         visuals.panel_fill = bg_color;
         visuals.window_fill = bg_color;
-        visuals.extreme_bg_color = bg_color; // Makes the TextEdit background seamless with the panel
+        visuals.extreme_bg_color = bg_color;
 
-        visuals.selection.bg_fill = parse_hex(&theme.ui.selection_bg);
-        visuals.selection.stroke.color = egui::Color32::TRANSPARENT;
-        visuals.text_cursor.color = parse_hex(&theme.ui.cursor);
+        // Apply UI-specific selections globally to fix the vague text bug
+        visuals.selection.bg_fill = ui_selection_bg;
+        visuals.selection.stroke.color = ui_selection_text;
+        visuals.text_cursor.color = cursor_color;
 
         ctx.set_visuals(visuals);
 
