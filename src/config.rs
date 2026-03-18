@@ -142,7 +142,6 @@ impl Default for CCslipsConfig {
             "\\cite",
             "\\date",
             "\\label",
-            "\\end",
             "\\paragraph",
             "\\subparagraph",
             "\\section",
