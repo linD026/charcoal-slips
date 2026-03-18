@@ -3,7 +3,7 @@
 Charcoal Slips (cclips) is a latex editor with a LLM-based grammar checking.
 It targets to help the user to check the grammar for the writing.
 cclips provides the basic latex editor features, such as search-replace, syntax highlighting, and autocompletion.
-cclips allows tthe user to configure the editor features statistically (need to relaunch the program).
+cclips allows tthe user to configure the editor features statically (need to relaunch the program).
 
 ## Build
 
