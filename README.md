@@ -3,7 +3,7 @@
 Charcoal Slips (ccslips) is a latex editor with a LLM-based grammar checking.
 It targets to help the user to check the grammar for the writing.
 ccslips provides the basic latex editor features, such as search-replace, syntax highlighting, and autocompletion.
-ccslips allows tthe user to configure the editor features statically (need to relaunch the program).
+ccslips allows the user to configure the editor features statically (need to relaunch the program).
 
 ## Build
 
@@ -21,7 +21,7 @@ You can modify `config_charcoal_slips.json` to change the configuration, such as
 
 ## Shortcuts
 
-### Editors
+### Editor
 
 - `Ctrl`+`S` to save
     > Note that ccslips performs auto-save when you switch to another file.
