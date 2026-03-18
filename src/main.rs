@@ -58,10 +58,10 @@ fn highlight_latex(text: &str, font_size: f32, is_dark: bool) -> egui::text::Lay
             //egui::Color32::from_rgb(17, 99, 41),
             //egui::Color32::from_rgb(215, 58, 73),
             //egui::Color32::from_rgb(111, 66, 193),
-            egui::Color32::from_rgb(36, 41, 46),   // Near Black (Normal text)
-            egui::Color32::from_rgb(0, 92, 197),   // Deep Blue (Commands)
-            egui::Color32::from_rgb(106, 115, 125),// Muted Gray-Green (Comments)
-            egui::Color32::from_rgb(215, 58, 73),  // Crimson Red (Brackets)
+            egui::Color32::from_rgb(36, 41, 46), // Near Black (Normal text)
+            egui::Color32::from_rgb(0, 92, 197), // Deep Blue (Commands)
+            egui::Color32::from_rgb(106, 115, 125), // Muted Gray-Green (Comments)
+            egui::Color32::from_rgb(215, 58, 73), // Crimson Red (Brackets)
             egui::Color32::from_rgb(111, 66, 193), // Royal Purple (Math mode)
         )
     };
@@ -363,13 +363,19 @@ impl CCslipsApp {
                         Path::new(&self.config.build.working_directory),
                         &self.current_file,
                     ) {
-                        if let Ok(content) = fs::read_to_string(&clicked_path) {
-                            self.editor_text = content;
-                            self.current_file = Some(clicked_path.clone());
-                            self.append_log(&format!(
-                                "[FILE] 📂 Opened: {}",
-                                clicked_path.display()
-                            ));
+                        if self.current_file.as_ref() != Some(&clicked_path) {
+                            if self.current_file.is_some() {
+                                self.save_current_file();
+                            }
+
+                            if let Ok(content) = fs::read_to_string(&clicked_path) {
+                                self.editor_text = content;
+                                self.current_file = Some(clicked_path.clone());
+                                self.append_log(&format!(
+                                    "[FILE] 📂 Opened: {}",
+                                    clicked_path.display()
+                                ));
+                            }
                         }
                     }
                 });
@@ -432,6 +438,10 @@ impl CCslipsApp {
 
                         if let Some((path, start, end)) = trigger_jump {
                             if self.current_file.as_ref() != Some(&path) {
+                                if self.current_file.is_some() {
+                                    self.save_current_file();
+                                }
+
                                 if let Ok(content) = fs::read_to_string(&path) {
                                     self.editor_text = content;
                                     self.current_file = Some(path.clone());

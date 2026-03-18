@@ -37,14 +37,14 @@ pub struct UiConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct LocalleafConfig {
+pub struct CCslipsConfig {
     pub ai: AiConfig,
     pub build: BuildConfig,
     pub editor: EditorConfig,
     pub ui: UiConfig,
 }
 
-impl Default for LocalleafConfig {
+impl Default for CCslipsConfig {
     fn default() -> Self {
         let current_path = env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
