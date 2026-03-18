@@ -133,6 +133,8 @@ impl Default for CCslipsConfig {
 
         let mut default_autocomplete = Vec::new();
         let brace_cmds = [
+            // default
+            "\\documentclass",
             "\\author",
             "\\bibliography",
             "\\caption",
@@ -140,7 +142,9 @@ impl Default for CCslipsConfig {
             "\\cite",
             "\\date",
             "\\label",
+            "\\end",
             "\\paragraph",
+            "\\subparagraph",
             "\\section",
             "\\subsection",
             "\\subsubsection",
@@ -150,12 +154,29 @@ impl Default for CCslipsConfig {
             "\\cref",
             "\\autoref",
             "\\nameref",
+            "\\bibliographystyle",
+            "\\bibliography",
+            // custom
+            "\\para",
+            "\\TODO",
+            "\\modified",
         ];
         default_autocomplete.extend(brace_cmds.iter().map(|&cmd| AutocompleteEntry {
             trigger: cmd.into(),
             insert: format!("{}{{$CURSOR$}}", cmd),
         }));
         let no_brace_cmds = [
+            // default
+            "\\tiny",
+            "\\scriptsize",
+            "\\footnotesize",
+            "\\small",
+            "\\normalsize",
+            "\\large",
+            "\\Large",
+            "\\LARGE",
+            "\\huge",
+            "\\Huge",
             "\\centering",
             "\\clearpage",
             "\\end",
@@ -164,21 +185,25 @@ impl Default for CCslipsConfig {
             "\\newline",
             "\\noindent",
             "\\tableofcontents",
-            "\\alpha",
-            "\\beta",
-            "\\gamma",
-            "\\lambda",
-            "\\infty",
+            // custom
+            "\\sys",
+            "\\kernel",
         ];
         default_autocomplete.extend(no_brace_cmds.iter().map(|&cmd| AutocompleteEntry {
             trigger: cmd.into(),
             insert: cmd.into(),
         }));
         let formatting = [
-            ("\\textbf", "textbf"),
-            ("\\textit", "textit"),
-            ("\\underline", "underline"),
             ("\\texttt", "texttt"),
+            ("\\textrm", "textrm"),
+            ("\\textsf", "textsf"),
+            ("\\textmd", "textmd"),
+            ("\\textbf", "textbf"),
+            ("\\textup", "textup"),
+            ("\\textit", "textit"),
+            ("\\textsl", "textsl"),
+            ("\\textsc", "textsc"),
+            ("\\underline", "underline"),
             ("\\emph", "emph"),
         ];
         default_autocomplete.extend(formatting.iter().map(|&(t, _)| AutocompleteEntry {
@@ -186,27 +211,47 @@ impl Default for CCslipsConfig {
             insert: format!("{}{{$CURSOR$}}", t),
         }));
 
-        default_autocomplete.push(AutocompleteEntry {
-            trigger: "\\frac".into(),
-            insert: "\\frac{$CURSOR$}{}".into(),
-        });
-        default_autocomplete.push(AutocompleteEntry {
-            trigger: "\\sum".into(),
-            insert: "\\sum_{$CURSOR$}^{}".into(),
-        });
+        let math = [
+            ("\\alpha", "\\alpha"),
+            ("\\beta", "\\beta"),
+            ("\\gamma", "\\gamma"),
+            ("\\lambda", "\\lambda"),
+            ("\\infty", "\\infty"),
+            ("\\sum", "\\sum"),
+            ("\\sqrt", "\\sqrt{$CURSOR$}"),
+            ("\\frac", "\\frac{$CURSOR$}{}"),
+            ("\\[", "\\[\n    $CURSOR$\n\\]"),
+            (
+                "\\begin{equation}",
+                "\\begin{equation}\n    $CURSOR$\n\\end{equation}",
+            ),
+        ];
+        default_autocomplete.extend(math.iter().map(|&(t, i)| AutocompleteEntry {
+            trigger: t.into(),
+            insert: i.into(),
+        }));
 
         let envs = [
+            ("\\begin", "\\begin{}\n    $CURSOR$\n\\end{}"),
             (
                 "\\begin{document}",
                 "\\begin{document}\n    $CURSOR$\n\\end{document}",
             ),
             (
-                "\\begin{equation}",
-                "\\begin{equation}\n    $CURSOR$\n\\end{equation}",
+                "\\begin{algorithm}",
+                "\\begin{algorithm}\n    $CURSOR$\n\\end{algorithm}",
             ),
             (
                 "\\begin{itemize}",
                 "\\begin{itemize}\n    \\item $CURSOR$\n\\end{itemize}",
+            ),
+            (
+                "\\begin{enumerate}",
+                "\\begin{enumerate}\n    \\item $CURSOR$\n\\end{enumerate}",
+            ),
+            (
+                "\\begin{table}",
+                "\\begin{table}[$CURSOR$]\n    \\centering\n    \\begin{tabular}{c|c}\n         &  \\\\\n         & \n    \\end{tabular}\n    \\caption{Caption}\n    \\label{tab:placeholder}\n\\end{table}",
             ),
             (
                 "\\begin{figure}",

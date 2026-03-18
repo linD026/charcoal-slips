@@ -138,19 +138,21 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
     // 1. Detect environment triggers (cite, ref, input)
     if let Some(brace_idx) = text_up_to_cursor.rfind('{') {
         let text_after_brace = &text_up_to_cursor[brace_idx..];
-        
+
         // Ensure we are actively typing inside the brace
         if !text_after_brace.contains('}') {
             let before_brace = text_up_to_cursor[..brace_idx].trim_end();
-            
+
             // Safely isolate the command without greedy-searching the whole file
             let mut cmd_search_area = before_brace;
-            
+
             // Only look for a '[' if the string immediately before our '{' ends with ']'
             if cmd_search_area.ends_with(']') {
                 if let Some(bracket_start) = cmd_search_area.rfind('[') {
                     // Safety check: ensure we didn't jump across unrelated brackets
-                    if !cmd_search_area[bracket_start..].contains('{') && !cmd_search_area[bracket_start..].contains('}') {
+                    if !cmd_search_area[bracket_start..].contains('{')
+                        && !cmd_search_area[bracket_start..].contains('}')
+                    {
                         cmd_search_area = cmd_search_area[..bracket_start].trim_end();
                     }
                 }
@@ -179,6 +181,8 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
             // Check for Files
             else if cmd_search_area.ends_with("\\includegraphics")
                 || cmd_search_area.ends_with("\\input")
+                || cmd_search_area.ends_with("\\bibliographystyle")
+                || cmd_search_area.ends_with("\\bibliography")
             {
                 return AutocompleteContext::File(search_term);
             }
@@ -186,7 +190,7 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
     }
 
     // 2. Detect Macro triggers (e.g., typing \tex...)
-    // Restrict macro detection to the CURRENT line. 
+    // Restrict macro detection to the CURRENT line.
     // This prevents a runaway '\' from 10 lines up from crashing the context engine.
     let current_line = text_up_to_cursor.lines().last().unwrap_or("");
     if let Some(idx) = current_line.rfind('\\') {
