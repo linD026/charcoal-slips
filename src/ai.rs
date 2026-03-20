@@ -1,58 +1,135 @@
 use crate::config::AiConfig;
-use chrono::{DateTime, Local};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::thread;
+use std::time::Duration;
 
+#[derive(Clone, Debug)]
 pub struct IndexEntry {
     pub file_path: PathBuf,
-    pub selected_text: String,
-    pub ai_summary: String,
     pub start_idx: usize,
     pub end_idx: usize,
-    pub timestamp: DateTime<Local>, // Added timestamp
+    pub selected_text: String,
+    pub ai_summary: String,
+    pub timestamp: chrono::DateTime<chrono::Local>,
+}
+
+#[derive(Serialize)]
+struct OllamaRequest {
+    model: String,
+    prompt: String,
+    system: String,
+    stream: bool,
+}
+
+#[derive(Deserialize)]
+struct OllamaResponse {
+    response: String,
 }
 
 pub fn trigger_ai_indexing(
-    ai_cfg: AiConfig,
-    file_path: PathBuf,
-    text: String,
-    start: usize,
-    end: usize,
+    config: AiConfig,
+    path: PathBuf,
+    selected_str: String,
+    start_idx: usize,
+    end_idx: usize,
     tx: Sender<IndexEntry>,
 ) {
+    // We spawn a background thread so the UI doesn't freeze while the AI thinks
     thread::spawn(move || {
-        let client = reqwest::blocking::Client::new();
-        let payload = serde_json::json!({
-            "model": ai_cfg.model,
-            "prompt": format!("{}\n\nText: {}", ai_cfg.system_prompt, text),
-            "stream": false
-        });
-
-        let summary = match client.post(&ai_cfg.url).json(&payload).send() {
-            Ok(res) => {
-                if res.status().is_success() {
-                    match res.json::<serde_json::Value>() {
-                        Ok(json) => json["response"]
-                            .as_str()
-                            .unwrap_or("Error: Invalid JSON")
-                            .to_string(),
-                        Err(e) => format!("Error: Failed to parse JSON - {}", e),
-                    }
-                } else {
-                    format!("Error: HTTP Status {}", res.status())
-                }
+        let client = match reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(300))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tx.send(IndexEntry {
+                    file_path: path.clone(),
+                    start_idx,
+                    end_idx,
+                    selected_text: selected_str.clone(),
+                    ai_summary: format!("Error: Failed to build HTTP client: {}", e),
+                    timestamp: chrono::Local::now(),
+                });
+                return;
             }
-            Err(e) => format!("Error: Network connection failed - {}", e),
         };
 
-        let _ = tx.send(IndexEntry {
-            file_path,
-            selected_text: text,
-            ai_summary: summary.trim().to_string(),
-            start_idx: start,
-            end_idx: end,
-            timestamp: Local::now(), // Capture current time
-        });
+        let req_body = OllamaRequest {
+            model: config.model.clone(),
+            prompt: selected_str.clone(),
+            system: config.system_prompt.clone(),
+            stream: false,
+        };
+
+        // Execute the request using our patient client
+        let response = client.post(&config.url).json(&req_body).send();
+
+        match response {
+            Ok(res) => {
+                if res.status().is_success() {
+                    if let Ok(json) = res.json::<OllamaResponse>() {
+                        let _ = tx.send(IndexEntry {
+                            file_path: path,
+                            start_idx,
+                            end_idx,
+                            selected_text: selected_str,
+                            ai_summary: json.response,
+                            timestamp: chrono::Local::now(),
+                        });
+                    } else {
+                        let _ = tx.send(IndexEntry {
+                            file_path: path,
+                            start_idx,
+                            end_idx,
+                            selected_text: selected_str,
+                            ai_summary: "Error: Failed to parse JSON response from Ollama".into(),
+                            timestamp: chrono::Local::now(),
+                        });
+                    }
+                } else {
+                    // --- ENHANCED DEBUGGING: Capture exact HTTP failures ---
+                    let status = res.status();
+                    let error_text = res.text().unwrap_or_default();
+                    let _ = tx.send(IndexEntry {
+                        file_path: path,
+                        start_idx,
+                        end_idx,
+                        selected_text: selected_str,
+                        ai_summary: format!(
+                            "Error: Ollama returned HTTP {} - {}",
+                            status, error_text
+                        ),
+                        timestamp: chrono::Local::now(),
+                    });
+                }
+            }
+            Err(e) => {
+                // Granular Network Error Breakdown
+                let mut debug_info = format!("Network connection failed: {}", e);
+
+                if e.is_timeout() {
+                    debug_info = format!(
+                        "Timeout: The {} model took longer than 300 seconds to respond. It may be too large for your hardware. Details: {}",
+                        config.model, e
+                    );
+                } else if e.is_connect() {
+                    debug_info = format!(
+                        "Connection Refused: Is Ollama currently running on your machine? Details: {}",
+                        e
+                    );
+                }
+
+                let _ = tx.send(IndexEntry {
+                    file_path: path,
+                    start_idx,
+                    end_idx,
+                    selected_text: selected_str,
+                    ai_summary: format!("Error: {}", debug_info),
+                    timestamp: chrono::Local::now(),
+                });
+            }
+        }
     });
 }
