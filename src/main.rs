@@ -859,6 +859,22 @@ impl eframe::App for CCslipsApp {
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::B)) {
             self.execute_build();
         }
+        // Cascading Close (Ctrl+W)
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::W)) {
+            if self.current_file.is_some() {
+                // 1. A file is open: Save it, clear the buffer, and deselect the file
+                self.save_current_file();
+                self.editor_text.clear();
+                self.current_file = None;
+                self.append_log("[SYSTEM] 📁 Closed current file.");
+
+                // Unfocus the text editor so the user doesn't accidentally type into the void
+                ctx.memory_mut(|mem| mem.surrender_focus(egui::Id::new("latex_editor")));
+            } else {
+                // 2. No file is open: Send the termination signal to the OS window manager
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
         if ctx.input(|i| {
             i.modifiers.command
                 && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
