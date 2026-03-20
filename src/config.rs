@@ -313,6 +313,10 @@ impl Default for CCslipsConfig {
             ("\\exp", "\\exp"),
             // Matrices and Complex Environments
             (
+                "\\[",
+                "\\[\n    $CURSOR$\n\\]",
+            ),
+            (
                 "\\begin{pmatrix}",
                 "\\begin{pmatrix}\n    $CURSOR$\n\\end{pmatrix}",
             ),
