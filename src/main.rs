@@ -22,6 +22,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 pub enum RightTab {
     Index,
     Terminal,
+    Monitor,
 }
 
 pub struct CCslipsApp {
@@ -253,6 +254,7 @@ impl CCslipsApp {
                 ui.horizontal(|ui| {
                     let is_index = self.active_right_tab == RightTab::Index;
                     let is_term = self.active_right_tab == RightTab::Terminal;
+                    let is_monitor = self.active_right_tab == RightTab::Monitor;
 
                     let index_text = if is_index {
                         egui::RichText::new("🧠 AI Index").strong()
@@ -270,6 +272,18 @@ impl CCslipsApp {
                     };
                     if ui.add(egui::Button::new(term_text).frame(false)).clicked() {
                         self.active_right_tab = RightTab::Terminal;
+                    }
+
+                    let monitor_text = if is_monitor {
+                        egui::RichText::new("📊 Monitor").strong()
+                    } else {
+                        egui::RichText::new("📊 Monitor").weak()
+                    };
+                    if ui
+                        .add(egui::Button::new(monitor_text).frame(false))
+                        .clicked()
+                    {
+                        self.active_right_tab = RightTab::Monitor;
                     }
                 });
                 ui.separator();
@@ -355,6 +369,90 @@ impl CCslipsApp {
                                         .layouter(&mut layouter),
                                 );
                             });
+                    }
+                    RightTab::Monitor => {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.add_space(4.0);
+
+                            // Editor Metrics
+                            ui.group(|ui| {
+                                ui.label(egui::RichText::new("📝 Editor Buffer").strong());
+                                ui.separator();
+
+                                // O(1) calculations for speed
+                                let bytes = self.editor_text.len();
+                                // Fast iterators for exact counts
+                                let chars = self.editor_text.chars().count();
+                                let lines = self.editor_text.lines().count();
+
+                                egui::Grid::new("editor_metrics_grid")
+                                    .num_columns(2)
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        ui.label("Lines:");
+                                        ui.label(lines.to_string());
+                                        ui.end_row();
+                                        ui.label("Characters:");
+                                        ui.label(chars.to_string());
+                                        ui.end_row();
+                                        ui.label("Est. Memory:");
+                                        ui.label(format!("{:.2} KB", bytes as f64 / 1024.0));
+                                        ui.end_row();
+                                    });
+                            });
+                            ui.add_space(8.0);
+
+                            // Cache Metrics
+                            ui.group(|ui| {
+                                ui.label(egui::RichText::new("🗄️ Internal Caches").strong());
+                                ui.separator();
+                                let (bib_files, bib_keys) = self.bib_cache.get_metrics();
+                                let (lbl_files, lbl_keys) = self.label_cache.get_metrics();
+
+                                egui::Grid::new("cache_metrics_grid")
+                                    .num_columns(2)
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        ui.label("BibTeX Files Tracked:");
+                                        ui.label(bib_files.to_string());
+                                        ui.end_row();
+                                        ui.label("BibTeX Keys Loaded:");
+                                        ui.label(bib_keys.to_string());
+                                        ui.end_row();
+                                        ui.label("LaTeX Files Tracked:");
+                                        ui.label(lbl_files.to_string());
+                                        ui.end_row();
+                                        ui.label("LaTeX Labels Loaded:");
+                                        ui.label(lbl_keys.to_string());
+                                        ui.end_row();
+                                    });
+                            });
+                            ui.add_space(8.0);
+
+                            // System & AI Metrics
+                            ui.group(|ui| {
+                                ui.label(egui::RichText::new("🔍 Subsystems").strong());
+                                ui.separator();
+
+                                egui::Grid::new("search_ai_metrics")
+                                    .num_columns(2)
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        ui.label("Active Search Matches:");
+                                        ui.label(self.search_state.matches.len().to_string());
+                                        ui.end_row();
+                                        ui.label("AI Index Entries:");
+                                        ui.label(self.index_entries.len().to_string());
+                                        ui.end_row();
+                                        ui.label("Terminal Log Size:");
+                                        ui.label(format!(
+                                            "{:.2} KB",
+                                            self.terminal_log.len() as f64 / 1024.0
+                                        ));
+                                        ui.end_row();
+                                    });
+                            });
+                        });
                     }
                 }
             });

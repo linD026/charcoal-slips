@@ -24,6 +24,13 @@ impl BibCache {
         }
     }
 
+    pub fn get_metrics(&self) -> (usize, usize) {
+        let num_files = self.files.len();
+        // Fast O(k) summation of all vectors
+        let num_keys: usize = self.files.values().map(|(_, keys)| keys.len()).sum();
+        (num_files, num_keys)
+    }
+
     pub fn get_keys(&mut self, workspace: &Path, bib_dir: &str) -> Vec<String> {
         let mut all_keys = Vec::new();
         let full_dir = workspace.join(bib_dir);
@@ -83,6 +90,13 @@ impl LabelCache {
         Self {
             files: HashMap::new(),
         }
+    }
+
+    pub fn get_metrics(&self) -> (usize, usize) {
+        let num_files = self.files.len();
+        // Fast O(k) summation of all vectors
+        let num_labels: usize = self.files.values().map(|(_, labels)| labels.len()).sum();
+        (num_files, num_labels)
     }
 
     pub fn get_labels(&mut self, workspace: &Path) -> Vec<String> {
