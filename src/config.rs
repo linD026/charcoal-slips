@@ -105,6 +105,7 @@ pub struct EditorConfig {
     pub font_size: f32,
     pub autocomplete_cmds: Vec<AutocompleteEntry>,
     pub bib_dir: String,
+    pub last_opened_file: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -464,6 +465,7 @@ impl Default for CCslipsConfig {
                 font_size: 12.0,
                 autocomplete_cmds: default_autocomplete,
                 bib_dir: "bib/".into(),
+                last_opened_file: None,
             },
             ui: UiConfig {
                 left_panel_width: 200.0,

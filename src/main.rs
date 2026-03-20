@@ -143,6 +143,18 @@ impl CCslipsApp {
             search_state: SearchState::default(),
         };
         app.append_log("[SYSTEM] Charcoal Slips Editor Initialized.");
+
+        if let Some(last_file) = &app.config.editor.last_opened_file.clone() {
+            let path = PathBuf::from(last_file);
+            if path.exists() && path.is_file() {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    app.editor_text = content;
+                    app.current_file = Some(path.clone());
+                    app.append_log(&format!("[SYSTEM] 📂 Restored session: {}", path.display()));
+                }
+            }
+        }
+
         app
     }
 
@@ -157,6 +169,51 @@ impl CCslipsApp {
                 Ok(_) => self.append_log(&format!("[FILE] 💾 Saved: {}", path.display())),
                 Err(e) => self.append_log(&format!("[ERROR] ❌ Save Failed: {}", e)),
             }
+        }
+    }
+
+    fn save_config(&self) {
+        let _ = fs::write(
+            "config_charcoal_slips.json",
+            serde_json::to_string_pretty(&self.config).unwrap_or_default(),
+        );
+    }
+
+    fn open_file(&mut self, path: PathBuf, is_jump: bool) {
+        if self.current_file.as_ref() != Some(&path) {
+            if self.current_file.is_some() {
+                self.save_current_file();
+            }
+
+            if let Ok(content) = fs::read_to_string(&path) {
+                self.editor_text = content;
+                self.current_file = Some(path.clone());
+
+                // Save this path to the JSON config so it survives app restarts
+                self.config.editor.last_opened_file = Some(path.to_string_lossy().to_string());
+                self.save_config();
+
+                let log_msg = if is_jump {
+                    format!("[FILE] 📂 Auto-opened for jump: {}", path.display())
+                } else {
+                    format!("[FILE] 📂 Opened: {}", path.display())
+                };
+                self.append_log(&log_msg);
+            }
+        }
+    }
+
+    fn close_file(&mut self) {
+        if self.current_file.is_some() {
+            self.save_current_file();
+            self.editor_text.clear();
+            self.current_file = None;
+
+            // Wipe the saved state from the JSON config
+            self.config.editor.last_opened_file = None;
+            self.save_config();
+
+            self.append_log("[SYSTEM] 📁 Closed current file.");
         }
     }
 
@@ -226,20 +283,7 @@ impl CCslipsApp {
                             Path::new(&self.config.build.working_directory),
                             &self.current_file,
                         ) {
-                            if self.current_file.as_ref() != Some(&clicked_path) {
-                                if self.current_file.is_some() {
-                                    self.save_current_file();
-                                }
-
-                                if let Ok(content) = fs::read_to_string(&clicked_path) {
-                                    self.editor_text = content;
-                                    self.current_file = Some(clicked_path.clone());
-                                    self.append_log(&format!(
-                                        "[FILE] 📂 Opened: {}",
-                                        clicked_path.display()
-                                    ));
-                                }
-                            }
+                            self.open_file(clicked_path, false);
                         }
                     });
                 });
@@ -328,20 +372,7 @@ impl CCslipsApp {
                         });
 
                         if let Some((path, start, end)) = trigger_jump {
-                            if self.current_file.as_ref() != Some(&path) {
-                                if self.current_file.is_some() {
-                                    self.save_current_file();
-                                }
-
-                                if let Ok(content) = fs::read_to_string(&path) {
-                                    self.editor_text = content;
-                                    self.current_file = Some(path.clone());
-                                    self.append_log(&format!(
-                                        "[FILE] 📂 Auto-opened for jump: {}",
-                                        path.display()
-                                    ));
-                                }
-                            }
+                            self.open_file(path, true);
                             self.jump_request = Some((start, end));
                         }
                     }
@@ -489,11 +520,7 @@ impl CCslipsApp {
             };
             if ui.button(theme_icon).clicked() {
                 self.config.ui.dark_mode = !self.config.ui.dark_mode;
-                fs::write(
-                    "config_charcoal_slips.json",
-                    serde_json::to_string_pretty(&self.config).unwrap(),
-                )
-                .ok();
+                self.save_config();
             }
             ui.separator();
 
@@ -862,12 +889,7 @@ impl eframe::App for CCslipsApp {
         // Cascading Close (Ctrl+W)
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::W)) {
             if self.current_file.is_some() {
-                // 1. A file is open: Save it, clear the buffer, and deselect the file
-                self.save_current_file();
-                self.editor_text.clear();
-                self.current_file = None;
-                self.append_log("[SYSTEM] 📁 Closed current file.");
-
+                self.close_file();
                 // Unfocus the text editor so the user doesn't accidentally type into the void
                 ctx.memory_mut(|mem| mem.surrender_focus(egui::Id::new("latex_editor")));
             } else {
