@@ -457,6 +457,7 @@ impl CCslipsApp {
                 }
             });
     }
+
     fn render_toolbar(&mut self, ui: &mut egui::Ui, current_selection: Option<(usize, usize)>) {
         // Extract and clone the specific strings we need *before* the closure.
         // This drops the immutable borrow on `self`, keeping the borrow checker perfectly happy.
@@ -544,6 +545,7 @@ impl CCslipsApp {
         });
         ui.separator();
     }
+
     fn render_editor_with_gutters(
         &mut self,
         ui: &mut egui::Ui,
@@ -686,6 +688,7 @@ impl CCslipsApp {
 
         output
     }
+
     fn render_highlight_matches(
         &mut self,
         ui: &mut egui::Ui,
@@ -727,256 +730,6 @@ impl CCslipsApp {
                     );
                     painter.rect_filled(rect, 2.0, color);
                 }
-            }
-        }
-    }
-
-    fn intercept_autocomplete_navigation(
-        &mut self,
-        ui: &mut egui::Ui,
-        editor_id: egui::Id,
-    ) -> (bool, Option<(usize, usize)>) {
-        let mut autocomplete_handled = false;
-        let mut local_jump_request = None;
-
-        if let Some((prefix, matches, mut selected_idx, start, end)) = self.active_menu.clone() {
-            if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
-                selected_idx = (selected_idx + 1) % matches.len(); // Wrap to top
-                self.active_menu = Some((prefix, matches, selected_idx, start, end));
-                autocomplete_handled = true;
-            } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
-                selected_idx = if selected_idx == 0 {
-                    matches.len() - 1
-                } else {
-                    selected_idx - 1
-                }; // Wrap to bottom
-                self.active_menu = Some((prefix, matches, selected_idx, start, end));
-                autocomplete_handled = true;
-            } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
-                || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
-            {
-                let (_, insert_raw) = &matches[selected_idx];
-                let mut insert_str = insert_raw.clone();
-                let cursor_offset = if let Some(idx) = insert_str.find("$CURSOR$") {
-                    let offset = insert_str.len() - (idx + "$CURSOR$".len());
-                    insert_str = insert_str.replace("$CURSOR$", "");
-                    offset
-                } else {
-                    0
-                };
-
-                self.editor_text.replace_range(start..end, &insert_str);
-                let new_pos = start + insert_str.len() - cursor_offset;
-                local_jump_request = Some((new_pos, new_pos));
-                self.active_menu = None;
-                self.dismissed_prefix = None;
-                autocomplete_handled = true;
-            } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                self.dismissed_prefix = Some(prefix);
-                self.active_menu = None;
-                autocomplete_handled = true;
-                ui.ctx().memory_mut(|mem| mem.request_focus(editor_id));
-            }
-        }
-        (autocomplete_handled, local_jump_request)
-    }
-
-    fn update_autocomplete_state(
-        &mut self,
-        output: &egui::text_edit::TextEditOutput,
-        autocomplete_handled: bool,
-    ) {
-        if let Some(cursor_range) = output.cursor_range {
-            // Dismiss if text is selected
-            if cursor_range.primary.ccursor.index != cursor_range.secondary.ccursor.index {
-                self.active_menu = None;
-            }
-        }
-
-        // Only evaluate if already open, OR if user actually typed something
-        let evaluate_autocomplete = self.active_menu.is_some() || output.response.changed();
-
-        if evaluate_autocomplete && output.response.has_focus() && !autocomplete_handled {
-            if let Some(cursor_range) = output.cursor_range {
-                let c_idx = cursor_range.primary.ccursor.index;
-                if c_idx <= self.editor_text.len()
-                    && cursor_range.primary.ccursor.index == cursor_range.secondary.ccursor.index
-                {
-                    let text_up_to_cursor = &self.editor_text[..c_idx];
-                    let context = detect_context(text_up_to_cursor);
-
-                    let current_prefix = match &context {
-                        AutocompleteContext::Macro(p)
-                        | AutocompleteContext::Citation(p)
-                        | AutocompleteContext::Label(p)
-                        | AutocompleteContext::File(p) => p.clone(),
-                        AutocompleteContext::None => String::new(),
-                    };
-
-                    let mut needs_update = true;
-                    if let Some((active_prefix, _, _, _, active_end)) = &self.active_menu {
-                        if active_prefix == &current_prefix && *active_end == c_idx {
-                            needs_update = false;
-                        }
-                    }
-
-                    if needs_update {
-                        match context {
-                            AutocompleteContext::Citation(prefix) => {
-                                let keys = self.bib_cache.get_keys(
-                                    Path::new(&self.config.build.working_directory),
-                                    &self.config.editor.bib_dir,
-                                );
-                                let matches: Vec<(String, String)> = keys
-                                    .into_iter()
-                                    .filter(|k| k.to_lowercase().contains(&prefix.to_lowercase()))
-                                    .map(|k| (k.clone(), k))
-                                    .take(8)
-                                    .collect();
-                                if !matches.is_empty() {
-                                    self.active_menu = Some((
-                                        prefix.clone(),
-                                        matches,
-                                        0,
-                                        c_idx - prefix.len(),
-                                        c_idx,
-                                    ));
-                                } else {
-                                    self.active_menu = None;
-                                }
-                            }
-                            AutocompleteContext::Label(prefix) => {
-                                let keys = self
-                                    .label_cache
-                                    .get_labels(Path::new(&self.config.build.working_directory));
-                                let matches: Vec<(String, String)> = keys
-                                    .into_iter()
-                                    .filter(|k| k.to_lowercase().contains(&prefix.to_lowercase()))
-                                    .map(|k| (k.clone(), k))
-                                    .take(8)
-                                    .collect();
-                                if !matches.is_empty() {
-                                    self.active_menu = Some((
-                                        prefix.clone(),
-                                        matches,
-                                        0,
-                                        c_idx - prefix.len(),
-                                        c_idx,
-                                    ));
-                                } else {
-                                    self.active_menu = None;
-                                }
-                            }
-                            AutocompleteContext::File(prefix) => {
-                                let files = get_file_suggestions(
-                                    Path::new(&self.config.build.working_directory),
-                                    &prefix,
-                                );
-                                let matches: Vec<(String, String)> =
-                                    files.into_iter().map(|f| (f.clone(), f)).take(8).collect();
-                                if !matches.is_empty() {
-                                    self.active_menu = Some((
-                                        prefix.clone(),
-                                        matches,
-                                        0,
-                                        c_idx - prefix.len(),
-                                        c_idx,
-                                    ));
-                                } else {
-                                    self.active_menu = None;
-                                }
-                            }
-                            AutocompleteContext::Macro(prefix) => {
-                                if self.dismissed_prefix.as_ref() != Some(&prefix) {
-                                    let mut matches: Vec<_> = self
-                                        .config
-                                        .editor
-                                        .autocomplete_cmds
-                                        .iter()
-                                        .filter(|c| {
-                                            c.trigger
-                                                .to_lowercase()
-                                                .contains(&prefix.to_lowercase())
-                                        })
-                                        .map(|c| (c.trigger.clone(), c.insert.clone()))
-                                        .collect();
-                                    matches.sort_by(|(a, _), (b, _)| {
-                                        let a_starts = a.starts_with(&prefix);
-                                        let b_starts = b.starts_with(&prefix);
-                                        if a_starts && !b_starts {
-                                            std::cmp::Ordering::Less
-                                        } else if !a_starts && b_starts {
-                                            std::cmp::Ordering::Greater
-                                        } else {
-                                            a.cmp(b)
-                                        }
-                                    });
-                                    matches.truncate(8);
-                                    if !matches.is_empty() {
-                                        self.active_menu = Some((
-                                            prefix.clone(),
-                                            matches,
-                                            0,
-                                            c_idx - prefix.len(),
-                                            c_idx,
-                                        ));
-                                    } else {
-                                        self.active_menu = None;
-                                    }
-                                }
-                            }
-                            AutocompleteContext::None => {
-                                self.active_menu = None;
-                                self.dismissed_prefix = None;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    fn draw_autocomplete_popup(&self, ui: &mut egui::Ui, output: &egui::text_edit::TextEditOutput) {
-        if let Some((_, matches, selected_idx, _, _)) = &self.active_menu {
-            let theme = if self.config.ui.dark_mode {
-                &self.config.ui.dark_theme
-            } else {
-                &self.config.ui.light_theme
-            };
-
-            let bg_color = parse_hex(&theme.ui.popup_bg);
-            let highlight_color = parse_hex(&theme.ui.popup_selected_text);
-
-            if let Some(cursor_range) = output.cursor_range {
-                // Restored the actual geometry math so the popup tracks the cursor
-                let galley = &output.galley;
-                let pos_in_galley = galley.pos_from_ccursor(cursor_range.primary.ccursor);
-                let screen_pos = output.galley_pos
-                    + pos_in_galley.min.to_vec2()
-                    + egui::vec2(0.0, self.config.editor.font_size * 1.5);
-
-                egui::Area::new(egui::Id::new("autocomplete_popup"))
-                    .fixed_pos(screen_pos)
-                    .order(egui::Order::Tooltip)
-                    .show(ui.ctx(), |ui| {
-                        // Use our custom background frame
-                        egui::Frame::popup(ui.style())
-                            .fill(bg_color)
-                            .show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    for (i, (display, _)) in matches.iter().enumerate() {
-                                        if i == *selected_idx {
-                                            ui.label(
-                                                egui::RichText::new(format!("▶ {}", display))
-                                                    .color(highlight_color)
-                                                    .strong(),
-                                            );
-                                        } else {
-                                            ui.label(egui::RichText::new(format!("  {}", display)));
-                                        }
-                                    }
-                                });
-                            });
-                    });
             }
         }
     }
