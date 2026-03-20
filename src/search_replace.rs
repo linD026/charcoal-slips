@@ -262,15 +262,6 @@ impl CCslipsApp {
                     response.request_focus();
                 }
 
-                if self.search_state.query_modified && !self.search_state.find_query.is_empty() {
-                    ui.label(
-                        egui::RichText::new("⏎ Press Enter to Search")
-                            .weak()
-                            .italics()
-                            .size(11.0),
-                    );
-                }
-
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("✖").clicked() {
                         self.search_state.is_active = false;
