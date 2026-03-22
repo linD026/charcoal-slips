@@ -193,12 +193,12 @@ impl CCslipsApp {
                 self.config.editor.last_opened_file = Some(path.to_string_lossy().to_string());
                 self.save_config();
 
-                let log_msg = if is_jump {
-                    format!("[FILE] 📂 Auto-opened for jump: {}", path.display())
-                } else {
-                    format!("[FILE] 📂 Opened: {}", path.display())
-                };
-                self.append_log(&log_msg);
+                //let log_msg = if is_jump {
+                //    format!("[FILE] 📂 Auto-opened for jump: {}", path.display())
+                //} else {
+                //    format!("[FILE] 📂 Opened: {}", path.display())
+                //};
+                //self.append_log(&log_msg);
             }
         }
     }
@@ -555,14 +555,25 @@ impl CCslipsApp {
                         trigger_ai_indexing(
                             self.config.ai.clone(),
                             path.clone(),
-                            selected_str,
+                            selected_str.clone(),
                             start,
                             end,
                             self.tx_ai.clone(),
                         );
                         self.active_right_tab = RightTab::Index;
                         self.is_generating = true;
-                    }
+
+                        let clean_str = selected_str.replace('\n', " ");
+                        let preview = if clean_str.len() > 50 {
+                            format!("{}...", &clean_str[..50])
+                        } else {
+                            clean_str
+                        };
+
+                        self.append_log(&format!(
+                            "[AI] 📡 Sending request to backend: \"{}\"",
+                            preview
+                        ));                    }
                 } else {
                     ui.add_enabled(false, egui::Button::new("Save file first to use AI"));
                 }
@@ -841,6 +852,14 @@ impl CCslipsApp {
 
 impl eframe::App for CCslipsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.current_file.is_some() {
+                self.save_current_file();
+                // Optionally save config as well, just to be absolutely certain
+                self.save_config();
+            }
+        }
+
         // Safely parse colors directly, releasing the lock on `self.config`
         // Extract both UI and Editor specific selection colors
         let (bg_color, ui_selection_bg, ui_selection_text, cursor_color) =

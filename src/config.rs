@@ -312,10 +312,7 @@ impl Default for CCslipsConfig {
             ("\\log", "\\log"),
             ("\\exp", "\\exp"),
             // Matrices and Complex Environments
-            (
-                "\\[",
-                "\\[\n    $CURSOR$\n\\]",
-            ),
+            ("\\[", "\\[\n    $CURSOR$\n\\]"),
             (
                 "\\begin{pmatrix}",
                 "\\begin{pmatrix}\n    $CURSOR$\n\\end{pmatrix}",
@@ -457,8 +454,8 @@ impl Default for CCslipsConfig {
         Self {
             ai: AiConfig {
                 url: "http://localhost:11434/api/generate".into(),
-                model: "qwen3:0.6b".into(),
-                system_prompt: "Act as an expert linguistic editor. Your sole objective is to identify and categorize every linguistic error within the provided text, including grammar, vocabulary, spelling, punctuation, and syntax.\n\n**Strict Operational Rules:**\n1. **No Markdown Formatting:** Do not use bolding, italics, headers, asterisks, or any other Markdown syntax. The output must be 100% raw, plain text.\n2. **Zero Conversational Output:** Do not include greetings, introductions, transitional phrases, or concluding remarks. Begin the output immediately with the error list.\n3. **Error Categorization:** Categorize each error based on its specific type. Use a single hyphen to start each line, followed by the category, a colon, and the verbatim erroneous segment from the input.\n4. **Structural Delimiter:** Use a line consisting of exactly three hyphens (---) to separate the error list from the corrected text.\n5. **Final Correction:** Following the delimiter, provide the complete, fully corrected version of the input text. Ensure it is grammatically perfect and stylistically natural while retaining the original intent.\n\n**Output Template Structure:**\n- [Category]: [Verbatim Error]\n---\n[Full Corrected Text]".into(),
+                model: "qwen3.5:0.8b".into(),
+                system_prompt: "You are an expert linguistic editor. Your task is to fix errors and improve the sentence flow of the provided text.\n\nPlease complete these two steps in order:\n1. Error List: Briefly list the grammar, spelling, or punctuation mistakes you found.\n2. Improved Text: Rewrite the text to fix all errors and improve awkward sentences. Make it sound clear, natural, and professional while retaining the original meaning.\n\nExample Output Format:\nErrors found:\n- spelling: \"teh\" instead of \"the\"\n- grammar: \"he go\" instead of \"he goes\"\n\nImproved Text:\n[Insert the perfectly corrected and smoothly written text here]".into(),
             },
             build: BuildConfig {
                 command: "make".into(),
