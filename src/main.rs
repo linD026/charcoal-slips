@@ -39,8 +39,8 @@ pub struct CCslipsApp {
 
     pub bib_cache: BibCache,
     pub label_cache: LabelCache,
-    // (prefix, formatted_display, insert_string, selected_index, start_idx, end_idx)
-    pub active_menu: Option<(String, Vec<(String, String)>, usize, usize, usize)>,
+    // (prefix, formatted_display, insert_string, type, selected_index, start_idx, end_idx)
+    pub active_menu: Option<(String, Vec<(String, String, String)>, usize, usize, usize)>,
     pub dismissed_prefix: Option<String>,
 
     pub search_state: SearchState,
@@ -573,7 +573,8 @@ impl CCslipsApp {
                         self.append_log(&format!(
                             "[AI] 📡 Sending request to backend: \"{}\"",
                             preview
-                        ));                    }
+                        ));
+                    }
                 } else {
                     ui.add_enabled(false, egui::Button::new("Save file first to use AI"));
                 }

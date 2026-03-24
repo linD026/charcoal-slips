@@ -266,7 +266,8 @@ impl CCslipsApp {
             } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
                 || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
             {
-                let (_, insert_raw) = &matches[selected_idx];
+                // Unpack the 3-element tuple (display, insert, kind)
+                let (_, insert_raw, _) = &matches[selected_idx];
                 let mut insert_str = insert_raw.clone();
                 let cursor_offset = if let Some(idx) = insert_str.find("$CURSOR$") {
                     let offset = insert_str.len() - (idx + "$CURSOR$".len());
@@ -298,13 +299,11 @@ impl CCslipsApp {
         autocomplete_handled: bool,
     ) {
         if let Some(cursor_range) = output.cursor_range {
-            // Dismiss if text is selected
             if cursor_range.primary.ccursor.index != cursor_range.secondary.ccursor.index {
                 self.active_menu = None;
             }
         }
 
-        // Only evaluate if already open, OR if user actually typed something
         let evaluate_autocomplete = self.active_menu.is_some() || output.response.changed();
 
         if evaluate_autocomplete && output.response.has_focus() && !autocomplete_handled {
@@ -338,11 +337,12 @@ impl CCslipsApp {
                                     Path::new(&self.config.build.working_directory),
                                     &self.config.editor.bib_dir,
                                 );
-                                let matches: Vec<(String, String)> = keys
+                                // Added type "bib"
+                                let matches: Vec<(String, String, String)> = keys
                                     .into_iter()
                                     .filter(|k| k.to_lowercase().contains(&prefix.to_lowercase()))
-                                    .map(|k| (k.clone(), k))
-                                    .take(8)
+                                    .map(|k| (k.clone(), k, "bib".to_string()))
+                                    .take(12)
                                     .collect();
                                 if !matches.is_empty() {
                                     self.active_menu = Some((
@@ -360,11 +360,12 @@ impl CCslipsApp {
                                 let keys = self
                                     .label_cache
                                     .get_labels(Path::new(&self.config.build.working_directory));
-                                let matches: Vec<(String, String)> = keys
+                                // Added type "label"
+                                let matches: Vec<(String, String, String)> = keys
                                     .into_iter()
                                     .filter(|k| k.to_lowercase().contains(&prefix.to_lowercase()))
-                                    .map(|k| (k.clone(), k))
-                                    .take(8)
+                                    .map(|k| (k.clone(), k, "label".to_string()))
+                                    .take(12)
                                     .collect();
                                 if !matches.is_empty() {
                                     self.active_menu = Some((
@@ -383,8 +384,12 @@ impl CCslipsApp {
                                     Path::new(&self.config.build.working_directory),
                                     &prefix,
                                 );
-                                let matches: Vec<(String, String)> =
-                                    files.into_iter().map(|f| (f.clone(), f)).take(8).collect();
+                                // Added type "file"
+                                let matches: Vec<(String, String, String)> = files
+                                    .into_iter()
+                                    .map(|f| (f.clone(), f, "file".to_string()))
+                                    .take(12)
+                                    .collect();
                                 if !matches.is_empty() {
                                     self.active_menu = Some((
                                         prefix.clone(),
@@ -399,6 +404,7 @@ impl CCslipsApp {
                             }
                             AutocompleteContext::Macro(prefix) => {
                                 if self.dismissed_prefix.as_ref() != Some(&prefix) {
+                                    // Added type "macro"
                                     let mut matches: Vec<_> = self
                                         .config
                                         .editor
@@ -409,9 +415,15 @@ impl CCslipsApp {
                                                 .to_lowercase()
                                                 .contains(&prefix.to_lowercase())
                                         })
-                                        .map(|c| (c.trigger.clone(), c.insert.clone()))
+                                        .map(|c| {
+                                            (
+                                                c.trigger.clone(),
+                                                c.insert.clone(),
+                                                "macro".to_string(),
+                                            )
+                                        })
                                         .collect();
-                                    matches.sort_by(|(a, _), (b, _)| {
+                                    matches.sort_by(|(a, _, _), (b, _, _)| {
                                         let a_starts = a.starts_with(&prefix);
                                         let b_starts = b.starts_with(&prefix);
                                         if a_starts && !b_starts {
@@ -422,7 +434,7 @@ impl CCslipsApp {
                                             a.cmp(b)
                                         }
                                     });
-                                    matches.truncate(8);
+                                    matches.truncate(12);
                                     if !matches.is_empty() {
                                         self.active_menu = Some((
                                             prefix.clone(),
@@ -446,6 +458,7 @@ impl CCslipsApp {
             }
         }
     }
+
     pub fn draw_autocomplete_popup(
         &self,
         ui: &mut egui::Ui,
@@ -462,7 +475,6 @@ impl CCslipsApp {
             let highlight_color = parse_hex(&theme.ui.popup_selected_text);
 
             if let Some(cursor_range) = output.cursor_range {
-                // Restored the actual geometry math so the popup tracks the cursor
                 let galley = &output.galley;
                 let pos_in_galley = galley.pos_from_ccursor(cursor_range.primary.ccursor);
                 let screen_pos = output.galley_pos
@@ -473,23 +485,60 @@ impl CCslipsApp {
                     .fixed_pos(screen_pos)
                     .order(egui::Order::Tooltip)
                     .show(ui.ctx(), |ui| {
-                        // Use our custom background frame
                         egui::Frame::popup(ui.style())
                             .fill(bg_color)
                             .show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    for (i, (display, _)) in matches.iter().enumerate() {
-                                        if i == *selected_idx {
-                                            ui.label(
-                                                egui::RichText::new(format!("▶ {}", display))
-                                                    .color(highlight_color)
-                                                    .strong(),
-                                            );
-                                        } else {
-                                            ui.label(egui::RichText::new(format!("  {}", display)));
+                                ui.set_min_width(40.0);
+
+                                // auto_shrink([false, true]) allows the width to expand for the longest word,
+                                // but keeps it from shrinking horizontally below the min_width.
+                                egui::ScrollArea::vertical()
+                                    .max_height(500.0)
+                                    .auto_shrink([true, true])
+                                    .show(ui, |ui| {
+                                        for (i, (display, _, kind)) in matches.iter().enumerate() {
+                                            let is_selected = i == *selected_idx;
+
+                                            // 1. Format the raw strings first.
+                                            // Pad to 5 chars ("label", "macro", "bib  ", "file ")
+                                            let prefix_marker =
+                                                if is_selected { "▶" } else { " " };
+
+                                            let kind_padded = format!("{} {:<5}", prefix_marker, kind);
+                                            let word_string = format!("{}", display);
+
+                                            // 2. Apply egui::RichText styling
+                                            // Using .monospace() ensures the spaces actually align perfectly
+                                            let mut type_text = egui::RichText::new(kind_padded)
+                                                .size(12.0)
+                                                .monospace();
+
+                                            let mut word_text =
+                                                egui::RichText::new(word_string).size(14.0);
+
+                                            if is_selected {
+                                                type_text = type_text
+                                                    .color(highlight_color.linear_multiply(0.7));
+                                                word_text =
+                                                    word_text.color(highlight_color).strong();
+                                            } else {
+                                                type_text = type_text.weak();
+                                            }
+
+                                            // 3. The Left-Aligned Row Layout
+                                            let row_resp = ui
+                                                .horizontal(|ui| {
+                                                    ui.label(type_text);
+                                                    ui.label(word_text);
+                                                })
+                                                .response;
+
+                                            // 3. Scroll Tracking
+                                            if is_selected {
+                                                row_resp.scroll_to_me(Some(egui::Align::Center));
+                                            }
                                         }
-                                    }
-                                });
+                                    });
                             });
                     });
             }
