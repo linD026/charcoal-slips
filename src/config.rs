@@ -85,6 +85,7 @@ pub struct AiConfig {
     pub url: String,
     pub model: String,
     pub system_prompt: String,
+    pub think: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -456,6 +457,7 @@ impl Default for CCslipsConfig {
                 url: "http://localhost:11434/api/generate".into(),
                 model: "qwen3.5:0.8b".into(),
                 system_prompt: "You are an expert linguistic editor. Your task is to fix errors and improve the sentence flow of the provided text.\n\nPlease complete these two steps in order:\n1. Error List: Briefly list the grammar, spelling, or punctuation mistakes you found.\n2. Improved Text: Rewrite the text to fix all errors and improve awkward sentences. Make it sound clear, natural, and professional while retaining the original meaning.\n\nExample Output Format:\nErrors found:\n- spelling: \"teh\" instead of \"the\"\n- grammar: \"he go\" instead of \"he goes\"\n\nImproved Text:\n[Insert the perfectly corrected and smoothly written text here]".into(),
+                think: false,
             },
             build: BuildConfig {
                 command: "make".into(),

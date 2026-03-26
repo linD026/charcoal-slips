@@ -20,6 +20,7 @@ struct OllamaRequest {
     model: String,
     prompt: String,
     system: String,
+    think: bool,
     stream: bool,
 }
 
@@ -60,6 +61,7 @@ pub fn trigger_ai_indexing(
             model: config.model.clone(),
             prompt: selected_str.clone(),
             system: config.system_prompt.clone(),
+            think: config.think.clone(),
             stream: false,
         };
 
