@@ -504,7 +504,8 @@ impl CCslipsApp {
                                             let prefix_marker =
                                                 if is_selected { "▶" } else { " " };
 
-                                            let kind_padded = format!("{} {:<5}", prefix_marker, kind);
+                                            let kind_padded =
+                                                format!("{} {:<5}", prefix_marker, kind);
                                             let word_string = format!("{}", display);
 
                                             // 2. Apply egui::RichText styling
