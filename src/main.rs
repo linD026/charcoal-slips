@@ -6,6 +6,7 @@ mod syntax_highlights;
 
 // New modules
 mod actions;
+mod shortcuts;
 mod ui;
 
 use ai::*;
@@ -13,9 +14,12 @@ use autocomplete::*;
 use config::{CCslipsConfig, parse_hex};
 use search_replace::*;
 
+// Use the new Shortcut system
+use shortcuts::{AppAction, ShortcutRegistry};
+
 use eframe::egui;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 #[derive(PartialEq)]
@@ -27,9 +31,9 @@ pub enum RightTab {
 
 #[derive(Clone, Copy, Debug)]
 pub struct VerticalCursor {
-    pub start_line: usize,
-    pub end_line: usize,
-    pub col: usize,
+    pub anchor_line: usize, // The line where Ctrl+Alt+V was pressed
+    pub active_line: usize, // The line navigated to via Arrow keys
+    pub col: usize,         // The horizontal column locked for editing
 }
 
 pub struct CCslipsApp {
@@ -52,9 +56,11 @@ pub struct CCslipsApp {
 
     pub search_state: SearchState,
 
-    // NEW: Vertical Cursor State
+    // Keyboard Driven State
     pub vertical_cursor: Option<VerticalCursor>,
-    pub alt_drag_start: Option<(usize, usize)>,
+
+    // NEW: Centralized Shortcut Registry
+    pub shortcuts: ShortcutRegistry,
 }
 
 impl CCslipsApp {
@@ -90,7 +96,7 @@ impl CCslipsApp {
             label_cache: LabelCache::new(),
             search_state: SearchState::default(),
             vertical_cursor: None,
-            alt_drag_start: None,
+            shortcuts: ShortcutRegistry::new(),
         };
         app.append_log("[SYSTEM] Charcoal Slips Editor Initialized.");
 
@@ -152,53 +158,61 @@ impl eframe::App for CCslipsApp {
 
         ctx.set_visuals(visuals);
 
-        // Global Keyboard Shortcuts
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S)) {
-            self.save_current_file();
-        }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::B)) {
-            self.execute_build();
-        }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::W)) {
-            if self.current_file.is_some() {
-                self.close_file();
-                ctx.memory_mut(|mem| mem.surrender_focus(egui::Id::new("latex_editor")));
-            } else {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-        }
-        if ctx.input(|i| {
-            i.modifiers.command
-                && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
-        }) {
-            self.config.editor.font_size = (self.config.editor.font_size + 1.0).clamp(8.0, 48.0);
-        }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Minus)) {
-            self.config.editor.font_size = (self.config.editor.font_size - 1.0).clamp(8.0, 48.0);
-        }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
-            self.search_state.is_active = true;
-            self.search_state.focus_find = true;
-            let editor_id = egui::Id::new("latex_editor");
-            if let Some(state) = egui::TextEdit::load_state(ctx, editor_id) {
-                if let Some(range) = state.cursor.char_range() {
-                    let start = range.primary.index.min(range.secondary.index);
-                    let end = range.primary.index.max(range.secondary.index);
-                    if start != end {
-                        self.search_state.find_query = self
-                            .editor_text
-                            .chars()
-                            .skip(start)
-                            .take(end - start)
-                            .collect();
-                        self.perform_search(false, true);
+        // ==========================================
+        // GLOBAL SHORTCUT PROCESSING
+        // ==========================================
+        let global_shortcuts = self.shortcuts.global.clone();
+        for shortcut in global_shortcuts {
+            if shortcut.consume(ctx) {
+                match shortcut.action {
+                    AppAction::SaveFile => self.save_current_file(),
+                    AppAction::BuildProject => self.execute_build(),
+                    AppAction::CloseWindowOrFile => {
+                        if self.current_file.is_some() {
+                            self.close_file();
+                            ctx.memory_mut(|mem| {
+                                mem.surrender_focus(egui::Id::new("latex_editor"))
+                            });
+                        } else {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
                     }
+                    AppAction::ZoomIn => {
+                        self.config.editor.font_size =
+                            (self.config.editor.font_size + 1.0).clamp(8.0, 48.0);
+                    }
+                    AppAction::ZoomOut => {
+                        self.config.editor.font_size =
+                            (self.config.editor.font_size - 1.0).clamp(8.0, 48.0);
+                    }
+                    AppAction::ToggleSearch => {
+                        self.search_state.is_active = true;
+                        self.search_state.focus_find = true;
+                        let editor_id = egui::Id::new("latex_editor");
+                        if let Some(state) = egui::TextEdit::load_state(ctx, editor_id) {
+                            if let Some(range) = state.cursor.char_range() {
+                                let start = range.primary.index.min(range.secondary.index);
+                                let end = range.primary.index.max(range.secondary.index);
+                                if start != end {
+                                    self.search_state.find_query = self
+                                        .editor_text
+                                        .chars()
+                                        .skip(start)
+                                        .take(end - start)
+                                        .collect();
+                                    self.perform_search(false, true);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
 
+        // Handle Escape globally to close search
         if self.search_state.is_active && self.active_menu.is_none() {
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            if self.shortcuts.check_action(ctx, AppAction::AbortOrClose) {
                 self.search_state.is_active = false;
                 self.search_state.matches.clear();
                 ctx.memory_mut(|mem| mem.request_focus(egui::Id::new("latex_editor")));

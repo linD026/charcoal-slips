@@ -1,5 +1,6 @@
 use crate::ai::trigger_ai_indexing;
 use crate::config::parse_hex;
+use crate::shortcuts::AppAction;
 use crate::syntax_highlights::{highlight_latex, highlight_logs};
 use crate::{CCslipsApp, RightTab, VerticalCursor};
 
@@ -326,7 +327,8 @@ impl CCslipsApp {
             }
             ui.separator();
 
-            let ai_triggered = ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::I));
+            // Check AI using the centralized Shortcut Registry
+            let ai_triggered = self.shortcuts.check_action(ui.ctx(), AppAction::SendToAi);
 
             if let Some((start, end)) = current_selection {
                 if let Some(path) = &self.current_file {
@@ -506,51 +508,9 @@ impl CCslipsApp {
         }
 
         // ==========================================
-        // VERTICAL EDIT (MULTI-CURSOR) RENDERING & DRAG DETECTION
+        // VERTICAL EDIT (MULTI-CURSOR) RENDERING
         // ==========================================
 
-        let interact_pos = ui.ctx().pointer_interact_pos();
-
-        // 1. Capture the Drag State if Alt/Cmd is held down
-        if ui.ctx().input(|i| i.modifiers.alt || i.modifiers.command) {
-            if ui.ctx().input(|i| i.pointer.primary_clicked()) {
-                if let Some(pos) = interact_pos {
-                    let local_pos = pos - output.galley_pos.to_vec2();
-                    let cursor = galley.cursor_from_pos(local_pos);
-
-                    self.alt_drag_start = Some((cursor.pcursor.paragraph, cursor.pcursor.offset));
-                    self.vertical_cursor = Some(VerticalCursor {
-                        start_line: cursor.pcursor.paragraph,
-                        end_line: cursor.pcursor.paragraph,
-                        col: cursor.pcursor.offset,
-                    });
-                }
-            } else if ui.ctx().input(|i| i.pointer.primary_down()) {
-                if let (Some(pos), Some((start_line, _))) = (interact_pos, self.alt_drag_start) {
-                    let local_pos = pos - output.galley_pos.to_vec2();
-                    let cursor = galley.cursor_from_pos(local_pos);
-
-                    self.vertical_cursor = Some(VerticalCursor {
-                        start_line: start_line.min(cursor.pcursor.paragraph),
-                        end_line: start_line.max(cursor.pcursor.paragraph),
-                        col: cursor.pcursor.offset, // Lock columns vertically to current drag position
-                    });
-
-                    // Defeat standard egui single-selection hijacking
-                    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
-                        state.cursor.set_char_range(None);
-                        egui::TextEdit::store_state(ui.ctx(), editor_id, state);
-                    }
-                }
-            } else {
-                self.alt_drag_start = None;
-            }
-        } else if ui.ctx().input(|i| i.pointer.primary_clicked()) {
-            self.vertical_cursor = None;
-            self.alt_drag_start = None;
-        }
-
-        // 2. Draw the visual cursors
         if let Some(vc) = &self.vertical_cursor {
             let cursor_color = if self.config.ui.dark_mode {
                 parse_hex(&self.config.ui.dark_theme.ui.cursor)
@@ -558,21 +518,35 @@ impl CCslipsApp {
                 parse_hex(&self.config.ui.light_theme.ui.cursor)
             };
 
-            // Typical egui cursor blink speed
+            // Clear native egui selection right away so it doesn't flicker/interfere
+            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
+                state.cursor.set_char_range(None);
+                egui::TextEdit::store_state(ui.ctx(), editor_id, state);
+            }
+
             let time = ui.input(|i| i.time);
             let blink_on = (time * 2.0).fract() < 0.5;
 
+            let start_l = vc.anchor_line.min(vc.active_line);
+            let end_l = vc.anchor_line.max(vc.active_line);
+
             if blink_on {
-                for line_idx in vc.start_line..=vc.end_line {
-                    let line_str = self.editor_text.lines().nth(line_idx).unwrap_or("");
+                for line_idx in start_l..=end_l {
+                    let line_str = self.editor_text.split('\n').nth(line_idx).unwrap_or("");
                     let actual_col = line_str.chars().count().min(vc.col);
 
-                    let pcursor = egui::text::PCursor {
-                        paragraph: line_idx,
-                        offset: actual_col,
-                    };
+                    let mut abs_index = 0;
+                    for (i, line) in self.editor_text.split('\n').enumerate() {
+                        if i < line_idx {
+                            abs_index += line.chars().count() + 1; // +1 for the newline
+                        } else if i == line_idx {
+                            abs_index += actual_col;
+                            break;
+                        }
+                    }
 
-                    let cursor_pos = galley.pos_from_pcursor(pcursor);
+                    let ccursor = egui::text::CCursor::new(abs_index);
+                    let cursor_pos = galley.pos_from_ccursor(ccursor);
                     let rect = cursor_pos.translate(output.galley_pos.to_vec2());
 
                     painter
@@ -645,9 +619,7 @@ impl CCslipsApp {
             self.render_toolbar(ui, current_selection);
 
             // Execute Vertical Edition Input processing BEFORE UI renders `TextEdit`
-            // This prevents regular `TextEdit` from trying to capture standard inputs
-            // when block-selection is active.
-            self.handle_vertical_edit_input(ctx);
+            self.handle_vertical_edit_input(ctx, editor_id);
 
             egui::ScrollArea::both()
                 .auto_shrink([false, false])
@@ -659,6 +631,7 @@ impl CCslipsApp {
                     }
 
                     let output = self.render_editor_with_gutters(ui, editor_id);
+
                     self.render_highlight_matches(ui, &output);
                     self.update_autocomplete_state(&output, autocomplete_handled);
                     self.draw_autocomplete_popup(ui, &output);
