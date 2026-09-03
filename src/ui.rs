@@ -374,6 +374,12 @@ impl CCslipsApp {
             } else {
                 ui.add_enabled(false, egui::Button::new("Highlight text to index..."));
             }
+
+            // Always put the help buttom to the last one
+            if ui.button("❓ Help").clicked() {
+                self.show_help_window = !self.show_help_window;
+            }
+            ui.separator();
         });
         ui.separator();
     }
@@ -525,11 +531,7 @@ impl CCslipsApp {
 
             let time = ui.input(|i| i.time);
 
-            // Check time elapsed since the last time the user pressed a key
             let time_since_action = time - self.last_vc_action_time;
-
-            // If they pressed a key in the last 0.5s, force the cursor to stay visible.
-            // Otherwise, let it blink normally. This eliminates flicker while moving/typing!
             let blink_on = if time_since_action < 0.5 {
                 true
             } else {
@@ -554,9 +556,6 @@ impl CCslipsApp {
                 }
             }
 
-            // AUTO-SCROLL CAMERA:
-            // If the user just pressed an arrow key or typed a letter, ensure the active
-            // part of the block is pushed into the visible area of the ScrollArea!
             if self.scroll_to_vc {
                 let active_line_str = self
                     .editor_text
@@ -570,8 +569,6 @@ impl CCslipsApp {
                 let cursor_pos = galley.pos_from_ccursor(ccursor);
                 let rect = cursor_pos.translate(output.galley_pos.to_vec2());
 
-                // Using 'None' instead of 'Align::Center' forces the ScrollArea to do the bare
-                // minimum movement necessary to bring the cursor into view, making it perfectly smooth.
                 ui.scroll_to_rect(rect, None);
                 self.scroll_to_vc = false;
             }
@@ -640,7 +637,6 @@ impl CCslipsApp {
 
             self.render_toolbar(ui, current_selection);
 
-            // Execute Vertical Edition Input processing BEFORE UI renders `TextEdit`
             self.handle_vertical_edit_input(ctx, editor_id);
 
             egui::ScrollArea::both()
@@ -678,5 +674,88 @@ impl CCslipsApp {
                     }
                 });
         });
+    }
+
+    // NEW: Renders the Help window overlay floating on top of the UI
+    pub fn render_help_window(&mut self, ctx: &egui::Context) {
+        let mut is_open = self.show_help_window;
+
+        egui::Window::new("❓ Keyboard Shortcuts & Help")
+            .open(&mut is_open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(450.0)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.heading("Global Shortcuts");
+                    ui.separator();
+                    egui::Grid::new("global_shortcuts_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 8.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for shortcut in &self.shortcuts.global {
+                                ui.label(egui::RichText::new(shortcut.display_string()).strong());
+                                ui.label(shortcut.help);
+                                ui.end_row();
+                            }
+                        });
+                    ui.add_space(20.0);
+
+                    ui.heading("Editor Shortcuts");
+                    ui.separator();
+                    egui::Grid::new("editor_shortcuts_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 8.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for shortcut in &self.shortcuts.editor {
+                                ui.label(egui::RichText::new(shortcut.display_string()).strong());
+                                ui.label(shortcut.help);
+                                ui.end_row();
+                            }
+                        });
+
+                    ui.add_space(20.0);
+
+                    // Vim Vertical Mode Tutorial
+                    ui.group(|ui| {
+                        ui.heading("💡 How to use Vertical Edit Mode");
+                        ui.separator();
+                        ui.label("Vertical Edit mode allows you to edit multiple lines of code simultaneously (Vim-style block selection).");
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("1.").strong());
+                            ui.label("Move your cursor to the starting position.");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("2.").strong());
+                            ui.label("Press");
+                            ui.label(egui::RichText::new("Ctrl/Cmd + Alt + V").strong().code());
+                            ui.label("to drop the anchor cursor.");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("3.").strong());
+                            ui.label("Use the");
+                            ui.label(egui::RichText::new("Up").strong().code());
+                            ui.label("and");
+                            ui.label(egui::RichText::new("Down").strong().code());
+                            ui.label("arrow keys to expand the block.");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("4.").strong());
+                            ui.label("Begin typing to push text to all lines simultaneously.");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("5.").strong());
+                            ui.label("Press");
+                            ui.label(egui::RichText::new("Escape").strong().code());
+                            ui.label("or click anywhere to return to normal editing.");
+                        });
+                    });
+                });
+            });
+
+        self.show_help_window = is_open;
     }
 }

@@ -56,10 +56,13 @@ pub struct CCslipsApp {
 
     // Keyboard Driven State
     pub vertical_cursor: Option<VerticalCursor>,
-    pub scroll_to_vc: bool,       // NEW: Tells UI to auto-scroll to the cursor
-    pub last_vc_action_time: f64, // NEW: Keeps the cursor solid while moving/typing
+    pub scroll_to_vc: bool,
+    pub last_vc_action_time: f64,
 
     pub shortcuts: ShortcutRegistry,
+
+    // NEW: Help Window State
+    pub show_help_window: bool,
 }
 
 impl CCslipsApp {
@@ -98,6 +101,7 @@ impl CCslipsApp {
             scroll_to_vc: false,
             last_vc_action_time: 0.0,
             shortcuts: ShortcutRegistry::new(),
+            show_help_window: false,
         };
         app.append_log("[SYSTEM] Charcoal Slips Editor Initialized.");
 
@@ -234,6 +238,9 @@ impl eframe::App for CCslipsApp {
         self.render_left_panel(ctx);
         self.render_right_panel(ctx);
         self.render_central_panel(ctx);
+
+        // Render Floating Overlays (Always Last!)
+        self.render_help_window(ctx);
     }
 }
 

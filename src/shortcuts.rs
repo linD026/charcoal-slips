@@ -35,6 +35,22 @@ impl ShortcutDef {
             primary || secondary
         })
     }
+
+    /// Formats the shortcut neatly for UI display (e.g. "Ctrl/Cmd + Alt + V")
+    pub fn display_string(&self) -> String {
+        let mut s = String::new();
+        if self.trigger.modifiers.command {
+            s.push_str("Ctrl/Cmd + ");
+        }
+        if self.trigger.modifiers.alt {
+            s.push_str("Alt/Opt + ");
+        }
+        if self.trigger.modifiers.shift {
+            s.push_str("Shift + ");
+        }
+        s.push_str(self.trigger.logical_key.name());
+        s
+    }
 }
 
 pub struct ShortcutRegistry {
@@ -116,7 +132,7 @@ impl ShortcutRegistry {
         }
     }
 
-    /// Checks if a specific action was triggered and consumes it to prevent OS overlap.
+    /// Checks if a specific action was triggered and consumes it to prevent OS overlap
     pub fn check_action(&self, ctx: &egui::Context, action: AppAction) -> bool {
         for shortcut in self.global.iter().chain(self.editor.iter()) {
             if shortcut.action == action {
