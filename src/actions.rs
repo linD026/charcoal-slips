@@ -106,15 +106,25 @@ impl CCslipsApp {
         (0, 0)
     }
 
+    pub fn line_col_to_char_index(&self, line_idx: usize, col: usize) -> usize {
+        let mut abs_index = 0;
+        for (i, line) in self.editor_text.split('\n').enumerate() {
+            if i < line_idx {
+                abs_index += line.chars().count() + 1;
+            } else if i == line_idx {
+                abs_index += line.chars().count().min(col);
+                break;
+            }
+        }
+        abs_index
+    }
+
     pub fn handle_vertical_edit_input(&mut self, ctx: &egui::Context, editor_id: egui::Id) {
-        // 1. TRIGGER: Ctrl + Alt + V (Using the new standardized Shortcut Registry)
         let toggle_mode = self
             .shortcuts
             .check_action(ctx, AppAction::ToggleVerticalEdit);
 
         if toggle_mode {
-            // Because TextEdit is hyper-aggressive, we STILL need to strip out
-            // any ghost 'Paste' or raw text events the OS queued up simultaneously.
             ctx.input_mut(|i| {
                 i.events.retain(|e| match e {
                     egui::Event::Paste(_) => false,
@@ -123,36 +133,38 @@ impl CCslipsApp {
                 });
             });
 
-            // Toggle off if we are already in the mode
             if self.vertical_cursor.is_some() {
                 self.vertical_cursor = None;
                 self.append_log("[SYSTEM] Vertical edit mode deactivated.");
             } else {
-                // Initialize the mode
                 if let Some(state) = egui::TextEdit::load_state(ctx, editor_id) {
-                    if let Some(range) = state.cursor.char_range() {
-                        let cursor_index = range.primary.index;
-                        let (line, col) = self.char_index_to_line_col(cursor_index);
+                    let cursor_index = state
+                        .cursor
+                        .char_range()
+                        .map(|r| r.primary.index)
+                        .unwrap_or(0);
+                    let (line, col) = self.char_index_to_line_col(cursor_index);
 
-                        self.vertical_cursor = Some(VerticalCursor {
-                            anchor_line: line,
-                            active_line: line,
-                            col,
-                        });
-                        self.append_log("[SYSTEM] Vertical edit mode activated.");
-                    }
+                    self.vertical_cursor = Some(VerticalCursor {
+                        anchor_line: line,
+                        active_line: line,
+                        col,
+                    });
+                    self.scroll_to_vc = true;
+                    self.last_vc_action_time = ctx.input(|i| i.time);
+                    self.append_log("[SYSTEM] Vertical edit mode activated.");
                 }
             }
             return;
         }
 
-        // 2. Navigation & Mutation (State Machine)
         let mut vc = match self.vertical_cursor {
             Some(v) => v,
             None => return,
         };
 
         let mut clear_vc = false;
+        let mut cursor_moved = false;
         let mut text_changed = false;
         let total_lines = self.editor_text.split('\n').count().max(1);
 
@@ -178,29 +190,35 @@ impl CCslipsApp {
                         egui::Key::ArrowUp => {
                             vc.active_line = vc.active_line.saturating_sub(1);
                             consume = true;
+                            cursor_moved = true;
                         }
                         egui::Key::ArrowDown => {
                             vc.active_line =
                                 (vc.active_line + 1).min(total_lines.saturating_sub(1));
                             consume = true;
+                            cursor_moved = true;
                         }
                         egui::Key::ArrowLeft => {
                             vc.col = vc.col.saturating_sub(1);
                             consume = true;
+                            cursor_moved = true;
                         }
                         egui::Key::ArrowRight => {
                             vc.col += 1;
                             consume = true;
+                            cursor_moved = true;
                         }
                         egui::Key::Backspace => {
                             vc.col = self.apply_vertical_backspace(&vc);
                             consume = true;
                             text_changed = true;
+                            cursor_moved = true;
                         }
                         egui::Key::Enter => {
                             vc.col = self.apply_vertical_insert_text(&vc, "\n");
                             consume = true;
                             text_changed = true;
+                            cursor_moved = true;
                         }
                         _ => {}
                     },
@@ -209,12 +227,14 @@ impl CCslipsApp {
                             vc.col = self.apply_vertical_insert_text(&vc, text);
                             consume = true;
                             text_changed = true;
+                            cursor_moved = true;
                         }
                     }
                     egui::Event::Paste(text) => {
                         vc.col = self.apply_vertical_insert_text(&vc, text);
                         consume = true;
                         text_changed = true;
+                        cursor_moved = true;
                     }
                     _ => {}
                 }
@@ -229,11 +249,22 @@ impl CCslipsApp {
             self.vertical_cursor = None;
             self.append_log("[SYSTEM] Vertical edit mode deactivated.");
         } else {
+            let new_total = self.editor_text.split('\n').count().max(1);
+            vc.anchor_line = vc.anchor_line.min(new_total.saturating_sub(1));
+            vc.active_line = vc.active_line.min(new_total.saturating_sub(1));
             self.vertical_cursor = Some(vc);
 
-            if text_changed {
+            if text_changed || cursor_moved {
+                self.last_vc_action_time = ctx.input(|i| i.time); // Reset blink timer!
+                self.scroll_to_vc = true; // Tell UI to update the camera!
+
+                // Sync the hidden native cursor to keep logic aligned
+                let active_idx = self.line_col_to_char_index(vc.active_line, vc.col);
                 if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
-                    state.cursor.set_char_range(None);
+                    let ccursor = egui::text::CCursor::new(active_idx);
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
                     egui::TextEdit::store_state(ctx, editor_id, state);
                 }
             }

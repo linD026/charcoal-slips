@@ -400,7 +400,12 @@ impl CCslipsApp {
             )
         };
 
-        ui.visuals_mut().selection.bg_fill = editor_selection_bg;
+        if self.vertical_cursor.is_some() {
+            ui.visuals_mut().selection.bg_fill = egui::Color32::TRANSPARENT;
+            ui.visuals_mut().text_cursor.color = egui::Color32::TRANSPARENT;
+        } else {
+            ui.visuals_mut().selection.bg_fill = editor_selection_bg;
+        }
         ui.visuals_mut().selection.stroke.color = egui::Color32::TRANSPARENT;
 
         let mut layouter = move |ui: &egui::Ui, string: &str, wrap_width: f32| {
@@ -518,14 +523,18 @@ impl CCslipsApp {
                 parse_hex(&self.config.ui.light_theme.ui.cursor)
             };
 
-            // Clear native egui selection right away so it doesn't flicker/interfere
-            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
-                state.cursor.set_char_range(None);
-                egui::TextEdit::store_state(ui.ctx(), editor_id, state);
-            }
-
             let time = ui.input(|i| i.time);
-            let blink_on = (time * 2.0).fract() < 0.5;
+
+            // Check time elapsed since the last time the user pressed a key
+            let time_since_action = time - self.last_vc_action_time;
+
+            // If they pressed a key in the last 0.5s, force the cursor to stay visible.
+            // Otherwise, let it blink normally. This eliminates flicker while moving/typing!
+            let blink_on = if time_since_action < 0.5 {
+                true
+            } else {
+                (time * 2.0).fract() < 0.5
+            };
 
             let start_l = vc.anchor_line.min(vc.active_line);
             let end_l = vc.anchor_line.max(vc.active_line);
@@ -535,16 +544,7 @@ impl CCslipsApp {
                     let line_str = self.editor_text.split('\n').nth(line_idx).unwrap_or("");
                     let actual_col = line_str.chars().count().min(vc.col);
 
-                    let mut abs_index = 0;
-                    for (i, line) in self.editor_text.split('\n').enumerate() {
-                        if i < line_idx {
-                            abs_index += line.chars().count() + 1; // +1 for the newline
-                        } else if i == line_idx {
-                            abs_index += actual_col;
-                            break;
-                        }
-                    }
-
+                    let abs_index = self.line_col_to_char_index(line_idx, actual_col);
                     let ccursor = egui::text::CCursor::new(abs_index);
                     let cursor_pos = galley.pos_from_ccursor(ccursor);
                     let rect = cursor_pos.translate(output.galley_pos.to_vec2());
@@ -552,6 +552,28 @@ impl CCslipsApp {
                     painter
                         .line_segment([rect.min, rect.max], egui::Stroke::new(2.0, cursor_color));
                 }
+            }
+
+            // AUTO-SCROLL CAMERA:
+            // If the user just pressed an arrow key or typed a letter, ensure the active
+            // part of the block is pushed into the visible area of the ScrollArea!
+            if self.scroll_to_vc {
+                let active_line_str = self
+                    .editor_text
+                    .split('\n')
+                    .nth(vc.active_line)
+                    .unwrap_or("");
+                let active_actual_col = active_line_str.chars().count().min(vc.col);
+
+                let active_abs_idx = self.line_col_to_char_index(vc.active_line, active_actual_col);
+                let ccursor = egui::text::CCursor::new(active_abs_idx);
+                let cursor_pos = galley.pos_from_ccursor(ccursor);
+                let rect = cursor_pos.translate(output.galley_pos.to_vec2());
+
+                // Using 'None' instead of 'Align::Center' forces the ScrollArea to do the bare
+                // minimum movement necessary to bring the cursor into view, making it perfectly smooth.
+                ui.scroll_to_rect(rect, None);
+                self.scroll_to_vc = false;
             }
         }
 

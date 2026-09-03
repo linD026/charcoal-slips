@@ -14,7 +14,6 @@ use autocomplete::*;
 use config::{CCslipsConfig, parse_hex};
 use search_replace::*;
 
-// Use the new Shortcut system
 use shortcuts::{AppAction, ShortcutRegistry};
 
 use eframe::egui;
@@ -31,9 +30,9 @@ pub enum RightTab {
 
 #[derive(Clone, Copy, Debug)]
 pub struct VerticalCursor {
-    pub anchor_line: usize, // The line where Ctrl+Alt+V was pressed
-    pub active_line: usize, // The line navigated to via Arrow keys
-    pub col: usize,         // The horizontal column locked for editing
+    pub anchor_line: usize,
+    pub active_line: usize,
+    pub col: usize,
 }
 
 pub struct CCslipsApp {
@@ -50,7 +49,6 @@ pub struct CCslipsApp {
 
     pub bib_cache: BibCache,
     pub label_cache: LabelCache,
-    // (prefix, formatted_display, insert_string, type, selected_index, start_idx, end_idx)
     pub active_menu: Option<(String, Vec<(String, String, String)>, usize, usize, usize)>,
     pub dismissed_prefix: Option<String>,
 
@@ -58,8 +56,9 @@ pub struct CCslipsApp {
 
     // Keyboard Driven State
     pub vertical_cursor: Option<VerticalCursor>,
+    pub scroll_to_vc: bool,       // NEW: Tells UI to auto-scroll to the cursor
+    pub last_vc_action_time: f64, // NEW: Keeps the cursor solid while moving/typing
 
-    // NEW: Centralized Shortcut Registry
     pub shortcuts: ShortcutRegistry,
 }
 
@@ -96,6 +95,8 @@ impl CCslipsApp {
             label_cache: LabelCache::new(),
             search_state: SearchState::default(),
             vertical_cursor: None,
+            scroll_to_vc: false,
+            last_vc_action_time: 0.0,
             shortcuts: ShortcutRegistry::new(),
         };
         app.append_log("[SYSTEM] Charcoal Slips Editor Initialized.");
@@ -210,7 +211,6 @@ impl eframe::App for CCslipsApp {
             }
         }
 
-        // Handle Escape globally to close search
         if self.search_state.is_active && self.active_menu.is_none() {
             if self.shortcuts.check_action(ctx, AppAction::AbortOrClose) {
                 self.search_state.is_active = false;
