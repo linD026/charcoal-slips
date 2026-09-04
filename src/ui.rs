@@ -2,7 +2,7 @@ use crate::ai::trigger_ai_indexing;
 use crate::config::parse_hex;
 use crate::shortcuts::AppAction;
 use crate::syntax_highlights::{highlight_latex, highlight_logs};
-use crate::{CCslipsApp, RightTab, VerticalCursor};
+use crate::{CCslipsApp, RightTab};
 
 use eframe::egui;
 use std::fs;
@@ -406,6 +406,9 @@ impl CCslipsApp {
             )
         };
 
+        // Clone the list of commands to pass into the closure
+        let label_cmds = self.config.editor.label_cmds.clone();
+
         if self.vertical_cursor.is_some() {
             ui.visuals_mut().selection.bg_fill = egui::Color32::TRANSPARENT;
             ui.visuals_mut().text_cursor.color = egui::Color32::TRANSPARENT;
@@ -415,7 +418,8 @@ impl CCslipsApp {
         ui.visuals_mut().selection.stroke.color = egui::Color32::TRANSPARENT;
 
         let mut layouter = move |ui: &egui::Ui, string: &str, wrap_width: f32| {
-            let mut layout_job = highlight_latex(string, font_size, &syntax_theme);
+            // Pass `&label_cmds` into the highlighter
+            let mut layout_job = highlight_latex(string, font_size, &syntax_theme, &label_cmds);
             layout_job.wrap.max_width = wrap_width;
             ui.fonts(|f| f.layout_job(layout_job))
         };

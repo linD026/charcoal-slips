@@ -18,9 +18,18 @@ enum LexerState {
     VerbatimBlock,     // Locked until exactly \end{verbatim}, lstlisting, or minted
     EnvNameWait(bool), // Saw \begin or \end, waiting for '{'. bool = is_begin
     EnvName(bool),     // Inside \begin{...}. bool = is_begin
+    LabelWait,         // Waiting for '{' after a citation/label command
+    LabelOptArg,       // Inside an optional argument [...]
+    LabelBody,         // Inside {...} processing the actual labels
 }
 
-pub fn highlight_latex(text: &str, font_size: f32, theme: &SyntaxTheme) -> egui::text::LayoutJob {
+//pub fn highlight_latex(text: &str, font_size: f32, theme: &SyntaxTheme) -> egui::text::LayoutJob {
+pub fn highlight_latex(
+    text: &str,
+    font_size: f32,
+    theme: &SyntaxTheme,
+    label_cmds: &[String],
+) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     let font = egui::FontId::monospace(font_size);
 
@@ -29,6 +38,7 @@ pub fn highlight_latex(text: &str, font_size: f32, theme: &SyntaxTheme) -> egui:
     let c_comment = parse_hex(&theme.comment);
     let c_bracket = parse_hex(&theme.bracket);
     let c_math = parse_hex(&theme.math);
+    let c_label = parse_hex(&theme.label);
 
     let mut state = LexerState::Normal;
     let mut token = String::new();
@@ -121,6 +131,9 @@ pub fn highlight_latex(text: &str, font_size: f32, theme: &SyntaxTheme) -> egui:
                         state = LexerState::EnvNameWait(true);
                     } else if cmd == "\\end" {
                         state = LexerState::EnvNameWait(false);
+                    } else if label_cmds.contains(&cmd) {
+                        // Caught a citation or label command
+                        state = LexerState::LabelWait;
                     } else {
                         state = LexerState::Normal;
                     }
@@ -276,16 +289,66 @@ pub fn highlight_latex(text: &str, font_size: f32, theme: &SyntaxTheme) -> egui:
                     i += 1;
                 }
             }
+            LexerState::LabelWait => {
+                if c.is_whitespace() {
+                    token.push(c);
+                    flush(&mut job, &mut token, c_norm);
+                    i += 1;
+                } else if c == '[' {
+                    token.push(c);
+                    flush(&mut job, &mut token, c_bracket);
+                    state = LexerState::LabelOptArg;
+                    i += 1;
+                } else if c == '{' {
+                    token.push(c);
+                    flush(&mut job, &mut token, c_bracket);
+                    state = LexerState::LabelBody;
+                    i += 1;
+                } else {
+                    state = LexerState::Normal; // Invalid syntax, abort label checking
+                }
+            }
+            LexerState::LabelOptArg => {
+                if c == ']' {
+                    flush(&mut job, &mut token, c_norm); // Flush inner [text] as normal
+                    token.push(c);
+                    flush(&mut job, &mut token, c_bracket);
+                    state = LexerState::LabelWait; // Return to waiting for {
+                } else {
+                    token.push(c);
+                }
+                i += 1;
+            }
+            LexerState::LabelBody => {
+                if c == '}' {
+                    flush(&mut job, &mut token, c_label); // Highlight the text
+                    token.push(c);
+                    flush(&mut job, &mut token, c_bracket);
+                    state = LexerState::Normal;
+                } else if c == ',' || c.is_whitespace() {
+                    flush(&mut job, &mut token, c_label); // Highlight the text
+                    token.push(c);
+                    flush(&mut job, &mut token, c_norm); // Leave commas/spaces normal
+                } else {
+                    token.push(c);
+                }
+                i += 1;
+            }
         }
     }
 
     // Ensure anything left in the buffer at EOF gets painted
     match state {
-        LexerState::Normal | LexerState::EnvNameWait(_) => flush(&mut job, &mut token, c_norm),
+        LexerState::Normal 
+        | LexerState::EnvNameWait(_) 
+        | LexerState::LabelWait 
+        | LexerState::LabelOptArg => flush(&mut job, &mut token, c_norm),
+        
         LexerState::Backslash | LexerState::Command | LexerState::EnvName(_) => {
             flush(&mut job, &mut token, c_cmd)
         }
         LexerState::Comment => flush(&mut job, &mut token, c_comment),
+        LexerState::LabelBody => flush(&mut job, &mut token, c_label),
         LexerState::InlineMath
         | LexerState::DisplayMath
         | LexerState::VerbatimCmdWait

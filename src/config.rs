@@ -54,6 +54,7 @@ pub struct SyntaxTheme {
     pub comment: String,
     pub bracket: String,
     pub math: String,
+    pub label: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -107,6 +108,7 @@ pub struct EditorConfig {
     pub autocomplete_cmds: Vec<AutocompleteEntry>,
     pub bib_dir: String,
     pub last_opened_file: Option<String>,
+    pub label_cmds: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -386,6 +388,25 @@ impl Default for CCslipsConfig {
             insert: i.into(),
         }));
 
+        // Default commands that trigger the label highlight
+        let default_label_cmds: Vec<String> = vec![
+            "\\cite",
+            "\\citet",
+            "\\citep",
+            "\\nocite",
+            "\\ref",
+            "\\cref",
+            "\\Cref",
+            "\\autoref",
+            "\\nameref",
+            "\\pageref",
+            "\\eqref",
+            "\\label",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+
         let default_light_theme = ThemeConfig {
             ui: UiTheme {
                 bg_color: "#F9F9F8".into(),
@@ -405,6 +426,7 @@ impl Default for CCslipsConfig {
                 comment: "#6A737D".into(),
                 bracket: "#D73A49".into(),
                 math: "#6F42C1".into(),
+                label: "#959DA5".into(),
             },
             search: SearchTheme {
                 match_bg: "#FFD70064".into(),
@@ -438,6 +460,7 @@ impl Default for CCslipsConfig {
                 comment: "#98C379".into(),
                 bracket: "#E5C07B".into(),
                 math: "#C678DD".into(),
+                label: "#5C6370".into(),
             },
             search: SearchTheme {
                 match_bg: "#FFFF0032".into(),
@@ -469,6 +492,7 @@ impl Default for CCslipsConfig {
                 autocomplete_cmds: default_autocomplete,
                 bib_dir: "bib/".into(),
                 last_opened_file: None,
+                label_cmds: default_label_cmds,
             },
             ui: UiConfig {
                 left_panel_width: 200.0,
