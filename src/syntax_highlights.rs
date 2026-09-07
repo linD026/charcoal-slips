@@ -339,11 +339,11 @@ pub fn highlight_latex(
 
     // Ensure anything left in the buffer at EOF gets painted
     match state {
-        LexerState::Normal 
-        | LexerState::EnvNameWait(_) 
-        | LexerState::LabelWait 
+        LexerState::Normal
+        | LexerState::EnvNameWait(_)
+        | LexerState::LabelWait
         | LexerState::LabelOptArg => flush(&mut job, &mut token, c_norm),
-        
+
         LexerState::Backslash | LexerState::Command | LexerState::EnvName(_) => {
             flush(&mut job, &mut token, c_cmd)
         }

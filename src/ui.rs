@@ -145,35 +145,133 @@ impl CCslipsApp {
                 match self.active_right_tab {
                     RightTab::Index => {
                         let mut trigger_jump = None;
+
+                        // Grab colors from your theme to style the errors and success text
+                        let (c_err, c_succ, c_info) = if self.config.ui.dark_mode {
+                            (
+                                parse_hex(&self.config.ui.dark_theme.terminal.error),
+                                parse_hex(&self.config.ui.dark_theme.terminal.success),
+                                parse_hex(&self.config.ui.dark_theme.terminal.info),
+                            )
+                        } else {
+                            (
+                                parse_hex(&self.config.ui.light_theme.terminal.error),
+                                parse_hex(&self.config.ui.light_theme.terminal.success),
+                                parse_hex(&self.config.ui.light_theme.terminal.info),
+                            )
+                        };
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             for entry in &self.index_entries {
                                 ui.group(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(&entry.ai_summary).strong().size(15.0),
-                                    );
-                                    let preview = if entry.selected_text.len() > 60 {
-                                        format!("\"{}...\"", &entry.selected_text[..60])
+                                    // 1. Header: Jump Button and Timestamp
+                                    ui.horizontal(|ui| {
+                                        if ui.button("⮐ Jump to Selection").clicked() {
+                                            trigger_jump = Some((
+                                                entry.file_path.clone(),
+                                                entry.start_idx,
+                                                entry.end_idx,
+                                            ));
+                                        }
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(
+                                                        entry
+                                                            .timestamp
+                                                            .format("%H:%M:%S")
+                                                            .to_string(),
+                                                    )
+                                                    .weak(),
+                                                );
+                                            },
+                                        );
+                                    });
+
+                                    ui.separator();
+
+                                    // 2. Original Text Preview
+                                    let preview = if entry.selected_text.len() > 80 {
+                                        format!("\"{}...\"", &entry.selected_text[..80])
                                     } else {
                                         format!("\"{}\"", entry.selected_text)
                                     };
-                                    ui.label(egui::RichText::new(preview).weak().italics());
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.label(
-                                                egui::RichText::new(
-                                                    entry.timestamp.format("%H:%M:%S").to_string(),
-                                                )
-                                                .weak(),
-                                            );
-                                        },
+                                    ui.label(
+                                        egui::RichText::new("Original:").small().color(c_info),
                                     );
-                                    if ui.button("⮐ Jump to Selection").clicked() {
-                                        trigger_jump = Some((
-                                            entry.file_path.clone(),
-                                            entry.start_idx,
-                                            entry.end_idx,
-                                        ));
+                                    ui.label(egui::RichText::new(preview).weak().italics());
+
+                                    ui.add_space(8.0);
+
+                                    // 3. Parsed AI Result
+                                    let summary = &entry.ai_summary;
+
+                                    // Detect the split marker (handles both plain text and markdown variants)
+                                    let split_marker = if summary.contains("**Improved Text:**") {
+                                        Some("**Improved Text:**")
+                                    } else if summary.contains("Improved Text:") {
+                                        Some("Improved Text:")
+                                    } else {
+                                        None
+                                    };
+
+                                    if let Some(marker) = split_marker {
+                                        let parts: Vec<&str> = summary.split(marker).collect();
+                                        let errors_part = parts[0].trim();
+                                        let improved_part = parts.get(1).unwrap_or(&"").trim();
+
+                                        // --- Errors Section ---
+                                        let clean_errors = errors_part
+                                            .trim_start_matches("**Errors found:**")
+                                            .trim_start_matches("Errors found:")
+                                            .trim();
+
+                                        if !clean_errors.is_empty() {
+                                            ui.label(
+                                                egui::RichText::new("Errors Found:")
+                                                    .strong()
+                                                    .color(c_err),
+                                            );
+                                            ui.label(clean_errors);
+                                            ui.add_space(6.0);
+                                        }
+
+                                        // --- Improved Text Section ---
+                                        if !improved_part.is_empty() {
+                                            ui.label(
+                                                egui::RichText::new("Improved Text:")
+                                                    .strong()
+                                                    .color(c_succ),
+                                            );
+
+                                            // Draw a subtle background behind the improved text
+                                            egui::Frame::none()
+                                                .fill(ui.visuals().faint_bg_color)
+                                                .inner_margin(6.0)
+                                                .show(ui, |ui| {
+                                                    ui.add(
+                                                        egui::Label::new(improved_part).wrap(true),
+                                                    );
+                                                });
+
+                                            ui.add_space(4.0);
+
+                                            // Copy to clipboard functionality
+                                            if ui.button("📋 Copy Improved Text").clicked() {
+                                                ui.output_mut(|o| {
+                                                    o.copied_text = improved_part.to_string()
+                                                });
+                                            }
+                                        }
+                                    } else {
+                                        // Fallback if AI output doesn't match the prompt format
+                                        ui.label(
+                                            egui::RichText::new("AI Response:")
+                                                .strong()
+                                                .color(c_info),
+                                        );
+                                        ui.label(summary);
                                     }
                                 });
                             }
@@ -184,6 +282,7 @@ impl CCslipsApp {
                             self.jump_request = Some((start, end));
                         }
                     }
+
                     RightTab::Terminal => {
                         let terminal_theme = if self.config.ui.dark_mode {
                             self.config.ui.dark_theme.terminal.clone()
