@@ -133,7 +133,19 @@ impl CCslipsApp {
                 });
             });
 
-            if self.vertical_cursor.is_some() {
+            if let Some(vc) = self.vertical_cursor {
+                //  Restore the native cursor state to the active column before toggling off!
+                let active_idx = self.line_col_to_char_index(vc.active_line, vc.col);
+                if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
+                    let ccursor = egui::text::CCursor::new(active_idx);
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                    egui::TextEdit::store_state(ctx, editor_id, state);
+                }
+                // Request focus back to the editor immediately
+                ctx.memory_mut(|mem| mem.request_focus(editor_id));
+
                 self.vertical_cursor = None;
                 self.append_log("[SYSTEM] Vertical edit mode deactivated.");
             } else {
@@ -164,6 +176,7 @@ impl CCslipsApp {
         };
 
         let mut clear_vc = false;
+        let mut restore_focus = false; // NEW: Track if we need to manually refocus
         let mut cursor_moved = false;
         let mut text_changed = false;
         let total_lines = self.editor_text.split('\n').count().max(1);
@@ -178,50 +191,53 @@ impl CCslipsApp {
                         pressed: true,
                         ..
                     } => {
-                        clear_vc = true;
+                        clear_vc = true; // Click drops the block, but we let focus go where they clicked
                     }
                     egui::Event::Key {
                         key, pressed: true, ..
-                    } => match key {
-                        egui::Key::Escape => {
-                            clear_vc = true;
-                            consume = true;
+                    } => {
+                        match key {
+                            egui::Key::Escape => {
+                                clear_vc = true;
+                                restore_focus = true; // Escape should keep focus on the editor!
+                                consume = true;
+                            }
+                            egui::Key::ArrowUp => {
+                                vc.active_line = vc.active_line.saturating_sub(1);
+                                consume = true;
+                                cursor_moved = true;
+                            }
+                            egui::Key::ArrowDown => {
+                                vc.active_line =
+                                    (vc.active_line + 1).min(total_lines.saturating_sub(1));
+                                consume = true;
+                                cursor_moved = true;
+                            }
+                            egui::Key::ArrowLeft => {
+                                vc.col = vc.col.saturating_sub(1);
+                                consume = true;
+                                cursor_moved = true;
+                            }
+                            egui::Key::ArrowRight => {
+                                vc.col += 1;
+                                consume = true;
+                                cursor_moved = true;
+                            }
+                            egui::Key::Backspace => {
+                                vc.col = self.apply_vertical_backspace(&vc);
+                                consume = true;
+                                text_changed = true;
+                                cursor_moved = true;
+                            }
+                            egui::Key::Enter => {
+                                vc.col = self.apply_vertical_insert_text(&vc, "\n");
+                                consume = true;
+                                text_changed = true;
+                                cursor_moved = true;
+                            }
+                            _ => {}
                         }
-                        egui::Key::ArrowUp => {
-                            vc.active_line = vc.active_line.saturating_sub(1);
-                            consume = true;
-                            cursor_moved = true;
-                        }
-                        egui::Key::ArrowDown => {
-                            vc.active_line =
-                                (vc.active_line + 1).min(total_lines.saturating_sub(1));
-                            consume = true;
-                            cursor_moved = true;
-                        }
-                        egui::Key::ArrowLeft => {
-                            vc.col = vc.col.saturating_sub(1);
-                            consume = true;
-                            cursor_moved = true;
-                        }
-                        egui::Key::ArrowRight => {
-                            vc.col += 1;
-                            consume = true;
-                            cursor_moved = true;
-                        }
-                        egui::Key::Backspace => {
-                            vc.col = self.apply_vertical_backspace(&vc);
-                            consume = true;
-                            text_changed = true;
-                            cursor_moved = true;
-                        }
-                        egui::Key::Enter => {
-                            vc.col = self.apply_vertical_insert_text(&vc, "\n");
-                            consume = true;
-                            text_changed = true;
-                            cursor_moved = true;
-                        }
-                        _ => {}
-                    },
+                    }
                     egui::Event::Text(text) => {
                         if !(text == "\t" && i.modifiers.alt) {
                             vc.col = self.apply_vertical_insert_text(&vc, text);
@@ -246,6 +262,21 @@ impl CCslipsApp {
         });
 
         if clear_vc {
+            // Restore the native cursor position before dropping the state
+            let active_idx = self.line_col_to_char_index(vc.active_line, vc.col);
+            if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
+                let ccursor = egui::text::CCursor::new(active_idx);
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                egui::TextEdit::store_state(ctx, editor_id, state);
+            }
+
+            // Force focus back if exited via keyboard
+            if restore_focus {
+                ctx.memory_mut(|mem| mem.request_focus(editor_id));
+            }
+
             self.vertical_cursor = None;
             self.append_log("[SYSTEM] Vertical edit mode deactivated.");
         } else {
@@ -255,8 +286,8 @@ impl CCslipsApp {
             self.vertical_cursor = Some(vc);
 
             if text_changed || cursor_moved {
-                self.last_vc_action_time = ctx.input(|i| i.time); // Reset blink timer!
-                self.scroll_to_vc = true; // Tell UI to update the camera!
+                self.last_vc_action_time = ctx.input(|i| i.time);
+                self.scroll_to_vc = true;
 
                 // Sync the hidden native cursor to keep logic aligned
                 let active_idx = self.line_col_to_char_index(vc.active_line, vc.col);
