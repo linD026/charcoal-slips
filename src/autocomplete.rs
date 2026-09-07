@@ -209,6 +209,7 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
                 || cmd_search_area.ends_with("\\cref")
                 || cmd_search_area.ends_with("\\autoref")
                 || cmd_search_area.ends_with("\\nameref")
+                || cmd_search_area.ends_with("\\label")
             {
                 if let Some(last_comma) = search_term.rfind(',') {
                     search_term = search_term[last_comma + 1..].trim_start().to_string();
