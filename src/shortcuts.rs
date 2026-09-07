@@ -94,13 +94,13 @@ impl ShortcutRegistry {
                     trigger: egui::KeyboardShortcut::new(cmd, egui::Key::Plus),
                     secondary_trigger: Some(egui::KeyboardShortcut::new(cmd, egui::Key::Equals)),
                     action: AppAction::ZoomIn,
-                    help: "Increase editor font size",
+                    help: "Zoom In (Scale entire UI)",
                 },
                 ShortcutDef {
                     trigger: egui::KeyboardShortcut::new(cmd, egui::Key::Minus),
                     secondary_trigger: None,
                     action: AppAction::ZoomOut,
-                    help: "Decrease editor font size",
+                    help: "Zoom Out (Scale entire UI)",
                 },
                 ShortcutDef {
                     trigger: egui::KeyboardShortcut::new(cmd, egui::Key::F),

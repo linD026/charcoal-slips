@@ -418,11 +418,11 @@ impl CCslipsApp {
             }
             ui.separator();
 
-            if ui.button("A-").clicked() {
-                self.config.editor.font_size -= 1.0;
+            if ui.button("🔍-").on_hover_text("Zoom Out UI").clicked() {
+                self.config.ui.zoom_factor = (self.config.ui.zoom_factor - 0.1).clamp(0.5, 3.0);
             }
-            if ui.button("A+").clicked() {
-                self.config.editor.font_size += 1.0;
+            if ui.button("🔍+").on_hover_text("Zoom In UI").clicked() {
+                self.config.ui.zoom_factor = (self.config.ui.zoom_factor + 0.1).clamp(0.5, 3.0);
             }
             ui.separator();
 

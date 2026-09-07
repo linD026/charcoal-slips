@@ -125,8 +125,9 @@ impl eframe::App for CCslipsApp {
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.current_file.is_some() {
                 self.save_current_file();
-                self.save_config();
             }
+            // Always saves the config
+            self.save_config();
         }
 
         let (bg_color, ui_selection_bg, ui_selection_text, cursor_color) =
@@ -163,6 +164,8 @@ impl eframe::App for CCslipsApp {
 
         ctx.set_visuals(visuals);
 
+        ctx.set_zoom_factor(self.config.ui.zoom_factor);
+
         // ==========================================
         // GLOBAL SHORTCUT PROCESSING
         // ==========================================
@@ -183,12 +186,12 @@ impl eframe::App for CCslipsApp {
                         }
                     }
                     AppAction::ZoomIn => {
-                        self.config.editor.font_size =
-                            (self.config.editor.font_size + 1.0).clamp(8.0, 48.0);
+                        self.config.ui.zoom_factor =
+                            (self.config.ui.zoom_factor + 0.1).clamp(0.5, 3.0);
                     }
                     AppAction::ZoomOut => {
-                        self.config.editor.font_size =
-                            (self.config.editor.font_size - 1.0).clamp(8.0, 48.0);
+                        self.config.ui.zoom_factor =
+                            (self.config.ui.zoom_factor - 0.1).clamp(0.5, 3.0);
                     }
                     AppAction::ToggleSearch => {
                         self.search_state.is_active = true;

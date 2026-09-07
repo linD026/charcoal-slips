@@ -32,6 +32,10 @@ pub fn parse_hex(hex: &str) -> egui::Color32 {
     safe_default
 }
 
+fn default_zoom_factor() -> f32 {
+    1.0
+}
+
 // --- Theme Structures ---
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UiTheme {
@@ -115,6 +119,8 @@ pub struct EditorConfig {
 pub struct UiConfig {
     pub left_panel_width: f32,
     pub right_panel_width: f32,
+    #[serde(default = "default_zoom_factor")]
+    pub zoom_factor: f32,
     pub dark_mode: bool,
     pub light_theme: ThemeConfig,
     pub dark_theme: ThemeConfig,
@@ -497,6 +503,7 @@ impl Default for CCslipsConfig {
             ui: UiConfig {
                 left_panel_width: 200.0,
                 right_panel_width: 320.0,
+                zoom_factor: 1.0,
                 dark_mode: true,
                 light_theme: default_light_theme,
                 dark_theme: default_dark_theme,
