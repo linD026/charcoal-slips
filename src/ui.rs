@@ -98,6 +98,64 @@ fn compute_diff(old: &str, new: &str) -> Vec<(DiffKind, String)> {
     compacted
 }
 
+// ==========================================
+// BRACKET PAIR MATCHING
+// ==========================================
+fn find_matching_brackets(text: &str, cursor_idx: usize) -> Option<(usize, usize)> {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return None;
+    }
+
+    let pairs = [('(', ')'), ('[', ']'), ('{', '}')];
+
+    let check_idx = |idx: usize| -> Option<(usize, usize)> {
+        if idx >= chars.len() {
+            return None;
+        }
+        let c = chars[idx];
+
+        // Search Forward (if we are on an opening bracket)
+        for &(open, close) in &pairs {
+            if c == open {
+                let mut depth = 1;
+                for i in (idx + 1)..chars.len() {
+                    if chars[i] == open {
+                        depth += 1;
+                    } else if chars[i] == close {
+                        depth -= 1;
+                    }
+                    if depth == 0 {
+                        return Some((idx, i));
+                    }
+                }
+            }
+        }
+
+        // Search Backward (if we are on a closing bracket)
+        for &(open, close) in &pairs {
+            if c == close {
+                let mut depth = 1;
+                for i in (0..idx).rev() {
+                    if chars[i] == close {
+                        depth += 1;
+                    } else if chars[i] == open {
+                        depth -= 1;
+                    }
+                    if depth == 0 {
+                        return Some((i, idx));
+                    }
+                }
+            }
+        }
+        None
+    };
+
+    // Standard behavior: prioritize checking the char directly AT the cursor,
+    // and if not a bracket, check the char immediately BEFORE the cursor.
+    check_idx(cursor_idx).or_else(|| cursor_idx.checked_sub(1).and_then(check_idx))
+}
+
 pub fn render_dir_tree(
     ui: &mut egui::Ui,
     path: &Path,
@@ -1093,6 +1151,7 @@ impl CCslipsApp {
                     let output = self.render_editor_with_gutters(ui, editor_id);
 
                     self.render_highlight_matches(ui, &output);
+                    self.render_bracket_matches(ui, &output, editor_id);
                     self.update_autocomplete_state(&output, autocomplete_handled);
                     self.draw_autocomplete_popup(ui, &output);
 
@@ -1116,6 +1175,80 @@ impl CCslipsApp {
                     }
                 });
         });
+    }
+
+    pub fn render_bracket_matches(
+        &mut self,
+        ui: &mut egui::Ui,
+        output: &egui::text_edit::TextEditOutput,
+        editor_id: egui::Id,
+    ) {
+        if let Some(state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
+            if let Some(range) = state.cursor.char_range() {
+                // Only show bracket matches if the user isn't actively highlighting a block of text
+                if range.primary.index == range.secondary.index {
+                    if let Some((m1, m2)) =
+                        find_matching_brackets(&self.editor_text, range.primary.index)
+                    {
+                        // Borrow the bracket color from the syntax theme
+                        let syntax_theme = if self.config.ui.dark_mode {
+                            &self.config.ui.dark_theme.syntax
+                        } else {
+                            &self.config.ui.light_theme.syntax
+                        };
+                        let bracket_color = parse_hex(&syntax_theme.bracket);
+
+                        let start1 = output.galley.pos_from_ccursor(egui::text::CCursor::new(m1));
+                        let end1 = output
+                            .galley
+                            .pos_from_ccursor(egui::text::CCursor::new(m1 + 1));
+
+                        let start2 = output.galley.pos_from_ccursor(egui::text::CCursor::new(m2));
+                        let end2 = output
+                            .galley
+                            .pos_from_ccursor(egui::text::CCursor::new(m2 + 1));
+
+                        // Helper to safely calculate character width (handles edge cases where text wraps)
+                        let get_rect = |start: egui::Rect, end: egui::Rect| {
+                                let mut width = end.min.x - start.min.x;
+                                if end.min.y > start.min.y || width <= 0.0 {
+                                    width = (start.max.y - start.min.y) * 0.6; // Approximate font aspect ratio
+                                }
+                                egui::Rect::from_min_max(
+                                    output.galley_pos + start.min.to_vec2(),
+                                    output.galley_pos
+                                        + egui::pos2(start.min.x + width, start.max.y).to_vec2(),
+                                )
+                                .expand(1.5) // Slight padding so it looks like a nice box
+                            };
+
+                        let rect1 = get_rect(start1, end1);
+                        let rect2 = get_rect(start2, end2);
+
+                        // Draw a subtle translucent background with a solid outline
+                        let bg_color = egui::Color32::from_rgba_unmultiplied(
+                            bracket_color.r(),
+                            bracket_color.g(),
+                            bracket_color.b(),
+                            40,
+                        );
+
+                        ui.painter().rect(
+                            rect1,
+                            2.0,
+                            bg_color,
+                            egui::Stroke::new(1.0, bracket_color),
+                        );
+                        ui.painter().rect(
+                            rect2,
+                            2.0,
+                            bg_color,
+                            egui::Stroke::new(1.0, bracket_color),
+                        );
+                    }
+                }
+            }
+        }
     }
 
     // Renders the Help window overlay floating on top of the UI

@@ -32,10 +32,6 @@ pub fn parse_hex(hex: &str) -> egui::Color32 {
     safe_default
 }
 
-fn default_zoom_factor() -> f32 {
-    1.0
-}
-
 // --- Theme Structures ---
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UiTheme {
@@ -49,6 +45,8 @@ pub struct UiTheme {
     pub ai_button_text: String,
     pub popup_bg: String,
     pub popup_selected_text: String,
+    pub bracket_match_bg: String,
+    pub bracket_match_stroke: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -119,7 +117,6 @@ pub struct EditorConfig {
 pub struct UiConfig {
     pub left_panel_width: f32,
     pub right_panel_width: f32,
-    #[serde(default = "default_zoom_factor")]
     pub zoom_factor: f32,
     pub dark_mode: bool,
     pub light_theme: ThemeConfig,
@@ -425,6 +422,8 @@ impl Default for CCslipsConfig {
                 ai_button_text: "#FFFFFF".into(),
                 popup_bg: "#F9F9F8".into(),
                 popup_selected_text: "#005CC5".into(),
+                bracket_match_bg: "#DDDDDD".into(),
+                bracket_match_stroke: "#DDAA00".into(),
             },
             syntax: SyntaxTheme {
                 normal: "#24292E".into(),
@@ -459,6 +458,8 @@ impl Default for CCslipsConfig {
                 ai_button_text: "#FFFFFF".into(),
                 popup_bg: "#303030".into(),
                 popup_selected_text: "#56B6C2".into(),
+                bracket_match_bg: "#555555".into(),
+                bracket_match_stroke: "#FFCC00".into(),
             },
             syntax: SyntaxTheme {
                 normal: "#D4D4D4".into(),
