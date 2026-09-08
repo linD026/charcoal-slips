@@ -1222,90 +1222,91 @@ impl CCslipsApp {
 
         egui::Window::new(title)
             .collapsible(false)
-            .resizable(false)
+            .resizable(true)
+            .default_size([450.0, 400.0]) // Start with a nice proportionate box
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(ctx.screen_rect().center())
             .open(&mut is_open)
             .show(ctx, |ui| {
                 match &mut current_op {
                     FileOperation::CreateFile(path) | FileOperation::CreateDir(path) => {
-                        ui.label(egui::RichText::new("Target Directory:").strong());
-
-                        let working_dir = PathBuf::from(&self.config.build.working_directory);
-
-                        // Render directory selector
-                        egui::ScrollArea::vertical()
-                            .max_height(150.0)
-                            .show(ui, |ui| {
+                        // 1. Lock the Text Input & Buttons to the BOTTOM of the window
+                        egui::TopBottomPanel::bottom("create_bottom_panel")
+                            .resizable(false)
+                            .frame(egui::Frame::none()) // Prevent nested background rendering
+                            .show_inside(ui, |ui| {
+                                ui.add_space(8.0);
                                 ui.horizontal(|ui| {
-                                    if ui
-                                        .radio(*path == working_dir, "📁 (Workspace Root)")
-                                        .clicked()
-                                    {
-                                        *path = working_dir.clone();
+                                    ui.label("Name:");
+                                    let response = ui.add(
+                                        egui::TextEdit::singleline(&mut self.file_op_input)
+                                            .desired_width(f32::INFINITY)
+                                    );
+                                    response.request_focus();
+                                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                        trigger_execute = true;
                                     }
                                 });
-                                ui.indent("dir_tree", |ui| {
-                                    render_select_dir_tree(ui, &working_dir, path);
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    if ui.button("Create").clicked() {
+                                        trigger_execute = true;
+                                    }
+                                    if ui.button("Cancel").clicked() {trigger_cancel = true;}});
+                            });
+
+                        // 2. Tell the Tree to fill 100% of the REMAINING space
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::none())
+                            .show_inside(ui, |ui| {
+                                ui.label(egui::RichText::new("Target Directory:").strong());
+                                let working_dir = PathBuf::from(&self.config.build.working_directory);
+                                egui::ScrollArea::vertical()
+                                    .auto_shrink([false, false]) // Stretch based on window resize
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            if ui.radio(*path == working_dir, "📁 (Workspace Root)").clicked() {
+                                                *path = working_dir.clone();
+                                            }
+                                        });
+                                        ui.indent("dir_tree", |ui| {
+                                            render_select_dir_tree(ui, &working_dir, path);
+                                        });
+                                    });
+                            });
+                    }
+                    FileOperation::Delete(selected) => {
+                        // 1. Lock the Buttons to the BOTTOM of the window
+                        egui::TopBottomPanel::bottom("delete_bottom_panel")
+                            .resizable(false)
+                            .frame(egui::Frame::none())
+                            .show_inside(ui, |ui| {
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    let btn_text = format!("🗑 Delete ({})", selected.len());
+                                    let del_btn = ui.add_enabled(!selected.is_empty(), egui::Button::new(egui::RichText::new(btn_text).color(egui::Color32::RED)));
+                                    if del_btn.clicked() {
+                                        trigger_execute = true;
+                                    }
+                                    if ui.button("Cancel").clicked() {
+                                        trigger_cancel = true;
+                                    }
                                 });
                             });
 
-                        ui.add_space(12.0);
-
-                        ui.horizontal(|ui| {
-                            ui.label("Name:");
-                            let response = ui.text_edit_singleline(&mut self.file_op_input);
-                            response.request_focus();
-
-                            if response.lost_focus()
-                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                            {
-                                trigger_execute = true;
-                            }
-                        });
-
-                        ui.add_space(8.0);
-
-                        ui.horizontal(|ui| {
-                            if ui.button("Create").clicked() {
-                                trigger_execute = true;
-                            }
-                            if ui.button("Cancel").clicked() {
-                                trigger_cancel = true;
-                            }
-                        });
-                    }
-                    FileOperation::Delete(selected) => {
-                        ui.label(
-                            "Select the files and directories you want to permanently delete:",
-                        );
-                        ui.add_space(8.0);
-
-                        let working_dir = PathBuf::from(&self.config.build.working_directory);
-
-                        egui::ScrollArea::vertical()
-                            .max_height(250.0)
-                            .show(ui, |ui| {
-                                render_delete_tree(ui, &working_dir, selected);
+                        // 2. Tell the Tree to fill 100% of the REMAINING space
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::none())
+                            .show_inside(ui, |ui| {
+                                ui.label("Select the files and directories you want to permanently delete:");
+                                ui.add_space(8.0);
+                                let working_dir = PathBuf::from(&self.config.build.working_directory);
+                                egui::ScrollArea::vertical()
+                                    .auto_shrink([false, false]) // Stretch based on window resize
+                                    .show(ui, |ui| {
+                                        render_delete_tree(ui, &working_dir, selected);
+                                    });
                             });
-
-                        ui.add_space(8.0);
-                        ui.horizontal(|ui| {
-                            let btn_text = format!("🗑 Delete ({})", selected.len());
-                            let del_btn = ui.add_enabled(
-                                !selected.is_empty(),
-                                egui::Button::new(
-                                    egui::RichText::new(btn_text).color(egui::Color32::RED),
-                                ),
-                            );
-
-                            if del_btn.clicked() {
-                                trigger_execute = true;
-                            }
-                            if ui.button("Cancel").clicked() {
-                                trigger_cancel = true;
-                            }
-                        });
                     }
                     FileOperation::None => {}
                 }
