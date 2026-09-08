@@ -1118,7 +1118,7 @@ impl CCslipsApp {
         });
     }
 
-    // NEW: Renders the Help window overlay floating on top of the UI
+    // Renders the Help window overlay floating on top of the UI
     pub fn render_help_window(&mut self, ctx: &egui::Context) {
         let mut is_open = self.show_help_window;
 
@@ -1208,7 +1208,7 @@ impl CCslipsApp {
 
         let mut is_open = true;
         let mut trigger_execute = false;
-        let mut trigger_cancel = false; // NEW: Track cancel clicks externally
+        let mut trigger_cancel = false; // Track cancel clicks externally
 
         // Take ownership temporarily to satisfy the borrow checker
         let mut current_op = std::mem::replace(&mut self.active_file_op, FileOperation::None);
@@ -1317,7 +1317,6 @@ impl CCslipsApp {
         if trigger_execute {
             self.execute_file_operation();
         } else if !is_open || trigger_cancel {
-            // FIXED
             self.active_file_op = FileOperation::None;
         }
     }

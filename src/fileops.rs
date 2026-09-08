@@ -1,7 +1,7 @@
 use crate::CCslipsApp;
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf; // NEW
+use std::path::PathBuf;
 
 // Tracks the active file/dir operation modal
 #[derive(Clone, PartialEq, Debug)]
@@ -9,7 +9,8 @@ pub enum FileOperation {
     None,
     CreateFile(PathBuf),
     CreateDir(PathBuf),
-    Delete(HashSet<PathBuf>), // UPDATED: Now tracks multiple selections
+    // tracks multiple selections
+    Delete(HashSet<PathBuf>),
 }
 
 impl CCslipsApp {

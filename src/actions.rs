@@ -176,7 +176,7 @@ impl CCslipsApp {
         };
 
         let mut clear_vc = false;
-        let mut restore_focus = false; // NEW: Track if we need to manually refocus
+        let mut restore_focus = false; // Track if we need to manually refocus
         let mut cursor_moved = false;
         let mut text_changed = false;
         let total_lines = self.editor_text.split('\n').count().max(1);
