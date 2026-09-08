@@ -1,12 +1,22 @@
 use crate::ai::trigger_ai_indexing;
 use crate::config::parse_hex;
+use crate::fileops::FileOperation;
 use crate::shortcuts::AppAction;
 use crate::syntax_highlights::{highlight_latex, highlight_logs};
 use crate::{CCslipsApp, RightTab};
 
 use eframe::egui;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+// Action enum to handle right-clicks and regular clicks
+pub enum TreeAction {
+    OpenFile(PathBuf),
+    CreateFile(PathBuf),
+    CreateDir(PathBuf),
+    Delete(HashSet<PathBuf>),
+}
 
 // ==========================================
 // INLINE DIFF ENGINE (LCS ALGORITHM)
@@ -92,8 +102,8 @@ pub fn render_dir_tree(
     ui: &mut egui::Ui,
     path: &Path,
     current_file: &Option<PathBuf>,
-) -> Option<PathBuf> {
-    let mut clicked = None;
+) -> Option<TreeAction> {
+    let mut action = None;
     if let Ok(entries) = fs::read_dir(path) {
         let mut dirs = Vec::new();
         let mut files = Vec::new();
@@ -121,14 +131,36 @@ pub fn render_dir_tree(
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            egui::CollapsingHeader::new(format!("📁 {}", name))
-                .default_open(false)
+            let header = egui::CollapsingHeader::new(format!("📁 {}", name)).default_open(false);
+
+            let response = header
                 .show(ui, |ui| {
                     if let Some(res) = render_dir_tree(ui, &d, current_file) {
-                        clicked = Some(res);
+                        action = Some(res);
                     }
-                });
+                })
+                .header_response;
+
+            // Right Click Context Menu
+            response.context_menu(|ui| {
+                if ui.button("📄+ New File Here").clicked() {
+                    action = Some(TreeAction::CreateFile(d.clone()));
+                    ui.close_menu();
+                }
+                if ui.button("📁+ New Dir Here").clicked() {
+                    action = Some(TreeAction::CreateDir(d.clone()));
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button("🗑 Delete Directory").clicked() {
+                    let mut set = HashSet::new();
+                    set.insert(d.clone());
+                    action = Some(TreeAction::Delete(set));
+                    ui.close_menu();
+                }
+            });
         }
+
         for f in files {
             let name = f
                 .file_name()
@@ -136,15 +168,132 @@ pub fn render_dir_tree(
                 .to_string_lossy()
                 .to_string();
             let is_selected = current_file.as_ref() == Some(&f);
-            if ui
-                .selectable_label(is_selected, format!("📄 {}", name))
-                .clicked()
-            {
-                clicked = Some(f);
+
+            let response = ui.selectable_label(is_selected, format!("📄 {}", name));
+            if response.clicked() {
+                action = Some(TreeAction::OpenFile(f.clone()));
             }
+
+            // Right Click Context Menu
+            response.context_menu(|ui| {
+                if ui.button("🗑 Delete File").clicked() {
+                    let mut set = HashSet::new();
+                    set.insert(f.clone());
+                    action = Some(TreeAction::Delete(set));
+                    ui.close_menu();
+                }
+            });
         }
     }
-    clicked
+    action
+}
+
+// Renders a checkbox tree for the delete modal
+pub fn render_delete_tree(ui: &mut egui::Ui, path: &Path, selected: &mut HashSet<PathBuf>) {
+    if let Ok(entries) = fs::read_dir(path) {
+        let mut dirs = Vec::new();
+        let mut files = Vec::new();
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .starts_with('.')
+            {
+                continue;
+            }
+            if p.is_dir() {
+                dirs.push(p);
+            } else {
+                files.push(p);
+            }
+        }
+        dirs.sort();
+        files.sort();
+
+        for d in dirs {
+            let name = d
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            ui.horizontal(|ui| {
+                let mut is_checked = selected.contains(&d);
+                if ui.checkbox(&mut is_checked, "").clicked() {
+                    if is_checked {
+                        selected.insert(d.clone());
+                    } else {
+                        selected.remove(&d);
+                    }
+                }
+                egui::CollapsingHeader::new(format!("📁 {}", name))
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        render_delete_tree(ui, &d, selected);
+                    });
+            });
+        }
+        for f in files {
+            let name = f
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            ui.horizontal(|ui| {
+                let mut is_checked = selected.contains(&f);
+                if ui
+                    .checkbox(&mut is_checked, format!("📄 {}", name))
+                    .clicked()
+                {
+                    if is_checked {
+                        selected.insert(f.clone());
+                    } else {
+                        selected.remove(&f);
+                    }
+                }
+            });
+        }
+    }
+}
+
+// Renders a radio-button tree for selecting a target directory
+pub fn render_select_dir_tree(ui: &mut egui::Ui, path: &Path, selected: &mut PathBuf) {
+    if let Ok(entries) = fs::read_dir(path) {
+        let mut dirs = Vec::new();
+        for entry in entries.flatten() {
+            let p = entry.path();
+            // Only show directories, and ignore hidden folders
+            if p.is_dir()
+                && !p
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .starts_with('.')
+            {
+                dirs.push(p);
+            }
+        }
+        dirs.sort();
+
+        for d in dirs {
+            let name = d
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            ui.horizontal(|ui| {
+                // Radio button to select this exact directory
+                if ui.radio(*selected == d, "").clicked() {
+                    *selected = d.clone();
+                }
+                egui::CollapsingHeader::new(format!("📁 {}", name))
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        render_select_dir_tree(ui, &d, selected);
+                    });
+            });
+        }
+    }
 }
 
 impl CCslipsApp {
@@ -153,7 +302,45 @@ impl CCslipsApp {
             .resizable(true)
             .default_width(self.config.ui.left_panel_width)
             .show(ctx, |ui| {
-                ui.heading("Workspace");
+                // Workspace header with quick-action buttons
+                ui.horizontal(|ui| {
+                    ui.heading("Workspace");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // 1. Dynamically figure out the target directory for new files/folders
+                        let target_dir = if let Some(current) = &self.current_file {
+                            if current.is_dir() {
+                                current.clone()
+                            } else if let Some(parent) = current.parent() {
+                                parent.to_path_buf()
+                            } else {
+                                PathBuf::from(&self.config.build.working_directory)
+                            }
+                        } else {
+                            PathBuf::from(&self.config.build.working_directory)
+                        };
+
+                        // 2. Render buttons
+                        if ui.button("🗑").on_hover_text("Delete Items").clicked() {
+                            self.active_file_op = FileOperation::Delete(HashSet::new());
+                        }
+                        if ui
+                            .button("📁+")
+                            .on_hover_text("New Folder in Current Dir")
+                            .clicked()
+                        {
+                            self.active_file_op = FileOperation::CreateDir(target_dir.clone());
+                            self.file_op_input.clear();
+                        }
+                        if ui
+                            .button("📄+")
+                            .on_hover_text("New File in Current Dir")
+                            .clicked()
+                        {
+                            self.active_file_op = FileOperation::CreateFile(target_dir);
+                            self.file_op_input.clear();
+                        }
+                    });
+                });
                 ui.separator();
 
                 if self.search_state.is_active {
@@ -168,12 +355,26 @@ impl CCslipsApp {
 
                 egui::CentralPanel::default().show_inside(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        if let Some(clicked_path) = render_dir_tree(
+                        // Process Tree Actions instead of just clicked paths
+                        if let Some(action) = render_dir_tree(
                             ui,
                             Path::new(&self.config.build.working_directory),
                             &self.current_file,
                         ) {
-                            self.open_file(clicked_path, false);
+                            match action {
+                                TreeAction::OpenFile(path) => self.open_file(path, false),
+                                TreeAction::CreateFile(path) => {
+                                    self.active_file_op = FileOperation::CreateFile(path);
+                                    self.file_op_input.clear();
+                                }
+                                TreeAction::CreateDir(path) => {
+                                    self.active_file_op = FileOperation::CreateDir(path);
+                                    self.file_op_input.clear();
+                                }
+                                TreeAction::Delete(path) => {
+                                    self.active_file_op = FileOperation::Delete(path);
+                                }
+                            }
                         }
                     });
                 });
@@ -998,5 +1199,126 @@ impl CCslipsApp {
             });
 
         self.show_help_window = is_open;
+    }
+
+    pub fn render_file_operation_modal(&mut self, ctx: &egui::Context) {
+        if self.active_file_op == FileOperation::None {
+            return;
+        }
+
+        let mut is_open = true;
+        let mut trigger_execute = false;
+        let mut trigger_cancel = false; // NEW: Track cancel clicks externally
+
+        // Take ownership temporarily to satisfy the borrow checker
+        let mut current_op = std::mem::replace(&mut self.active_file_op, FileOperation::None);
+
+        let title = match &current_op {
+            FileOperation::CreateFile(_) => "📄 Create New File",
+            FileOperation::CreateDir(_) => "📁 Create New Directory",
+            FileOperation::Delete(_) => "🗑 Select Items to Delete",
+            FileOperation::None => "",
+        };
+
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(ctx.screen_rect().center())
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                match &mut current_op {
+                    FileOperation::CreateFile(path) | FileOperation::CreateDir(path) => {
+                        ui.label(egui::RichText::new("Target Directory:").strong());
+
+                        let working_dir = PathBuf::from(&self.config.build.working_directory);
+
+                        // Render directory selector
+                        egui::ScrollArea::vertical()
+                            .max_height(150.0)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .radio(*path == working_dir, "📁 (Workspace Root)")
+                                        .clicked()
+                                    {
+                                        *path = working_dir.clone();
+                                    }
+                                });
+                                ui.indent("dir_tree", |ui| {
+                                    render_select_dir_tree(ui, &working_dir, path);
+                                });
+                            });
+
+                        ui.add_space(12.0);
+
+                        ui.horizontal(|ui| {
+                            ui.label("Name:");
+                            let response = ui.text_edit_singleline(&mut self.file_op_input);
+                            response.request_focus();
+
+                            if response.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            {
+                                trigger_execute = true;
+                            }
+                        });
+
+                        ui.add_space(8.0);
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Create").clicked() {
+                                trigger_execute = true;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                trigger_cancel = true;
+                            }
+                        });
+                    }
+                    FileOperation::Delete(selected) => {
+                        ui.label(
+                            "Select the files and directories you want to permanently delete:",
+                        );
+                        ui.add_space(8.0);
+
+                        let working_dir = PathBuf::from(&self.config.build.working_directory);
+
+                        egui::ScrollArea::vertical()
+                            .max_height(250.0)
+                            .show(ui, |ui| {
+                                render_delete_tree(ui, &working_dir, selected);
+                            });
+
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            let btn_text = format!("🗑 Delete ({})", selected.len());
+                            let del_btn = ui.add_enabled(
+                                !selected.is_empty(),
+                                egui::Button::new(
+                                    egui::RichText::new(btn_text).color(egui::Color32::RED),
+                                ),
+                            );
+
+                            if del_btn.clicked() {
+                                trigger_execute = true;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                trigger_cancel = true;
+                            }
+                        });
+                    }
+                    FileOperation::None => {}
+                }
+            });
+
+        // Put the state back into the struct
+        self.active_file_op = current_op;
+
+        if trigger_execute {
+            self.execute_file_operation();
+        } else if !is_open || trigger_cancel {
+            // FIXED
+            self.active_file_op = FileOperation::None;
+        }
     }
 }

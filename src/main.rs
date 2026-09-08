@@ -1,12 +1,11 @@
+mod actions;
 mod ai;
 mod autocomplete;
 mod config;
+mod fileops;
 mod search_replace;
-mod syntax_highlights;
-
-// New modules
-mod actions;
 mod shortcuts;
+mod syntax_highlights;
 mod ui;
 
 use ai::*;
@@ -14,6 +13,7 @@ use autocomplete::*;
 use config::{CCslipsConfig, parse_hex};
 use search_replace::*;
 
+use fileops::FileOperation;
 use shortcuts::{AppAction, ShortcutRegistry};
 
 use eframe::egui;
@@ -61,8 +61,12 @@ pub struct CCslipsApp {
 
     pub shortcuts: ShortcutRegistry,
 
-    // NEW: Help Window State
+    // Help Window State
     pub show_help_window: bool,
+
+    // FIle Operation States
+    pub active_file_op: FileOperation,
+    pub file_op_input: String,
 }
 
 impl CCslipsApp {
@@ -102,6 +106,8 @@ impl CCslipsApp {
             last_vc_action_time: 0.0,
             shortcuts: ShortcutRegistry::new(),
             show_help_window: false,
+            active_file_op: FileOperation::None,
+            file_op_input: String::new(),
         };
         app.append_log("[SYSTEM] Charcoal Slips Editor Initialized.");
 
@@ -244,6 +250,7 @@ impl eframe::App for CCslipsApp {
 
         // Render Floating Overlays (Always Last!)
         self.render_help_window(ctx);
+        self.render_file_operation_modal(ctx);
     }
 }
 
