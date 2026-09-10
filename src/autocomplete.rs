@@ -251,10 +251,12 @@ impl CCslipsApp {
         let mut autocomplete_handled = false;
         let mut local_jump_request = None;
 
-        if let Some((prefix, matches, mut selected_idx, start, end)) = self.active_menu.clone() {
+        if let Some((prefix, matches, mut selected_idx, start_byte, end_byte)) =
+            self.active_menu.clone()
+        {
             if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
                 selected_idx = (selected_idx + 1) % matches.len(); // Wrap to top
-                self.active_menu = Some((prefix, matches, selected_idx, start, end));
+                self.active_menu = Some((prefix, matches, selected_idx, start_byte, end_byte));
                 autocomplete_handled = true;
             } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
                 selected_idx = if selected_idx == 0 {
@@ -262,7 +264,7 @@ impl CCslipsApp {
                 } else {
                     selected_idx - 1
                 }; // Wrap to bottom
-                self.active_menu = Some((prefix, matches, selected_idx, start, end));
+                self.active_menu = Some((prefix, matches, selected_idx, start_byte, end_byte));
                 autocomplete_handled = true;
             } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
                 || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
@@ -278,9 +280,16 @@ impl CCslipsApp {
                     0
                 };
 
-                self.editor_text.replace_range(start..end, &insert_str);
-                let new_pos = start + insert_str.len() - cursor_offset;
-                local_jump_request = Some((new_pos, new_pos));
+                // Because active_menu now stores byte indices, replace_range is completely safe
+                self.editor_text
+                    .replace_range(start_byte..end_byte, &insert_str);
+
+                let new_byte_pos = start_byte + insert_str.len() - cursor_offset;
+
+                // Convert the resulting byte position back to a character index so egui's CCursor can jump to it safely
+                let new_char_pos = self.editor_text[..new_byte_pos].chars().count();
+
+                local_jump_request = Some((new_char_pos, new_char_pos));
                 self.active_menu = None;
                 self.dismissed_prefix = None;
                 autocomplete_handled = true;
@@ -309,11 +318,17 @@ impl CCslipsApp {
 
         if evaluate_autocomplete && output.response.has_focus() && !autocomplete_handled {
             if let Some(cursor_range) = output.cursor_range {
-                let c_idx = cursor_range.primary.ccursor.index;
-                if c_idx <= self.editor_text.len()
-                    && cursor_range.primary.ccursor.index == cursor_range.secondary.ccursor.index
-                {
-                    let text_up_to_cursor = &self.editor_text[..c_idx];
+                let c_idx = cursor_range.primary.ccursor.index; // egui provides a Character index
+                if cursor_range.primary.ccursor.index == cursor_range.secondary.ccursor.index {
+                    // Safely convert character index to byte index to avoid slicing panics on multi-byte chars
+                    let byte_idx = self
+                        .editor_text
+                        .char_indices()
+                        .nth(c_idx)
+                        .map(|(i, _)| i)
+                        .unwrap_or(self.editor_text.len());
+
+                    let text_up_to_cursor = &self.editor_text[..byte_idx];
                     let context = detect_context(text_up_to_cursor);
 
                     let current_prefix = match &context {
@@ -326,7 +341,8 @@ impl CCslipsApp {
 
                     let mut needs_update = true;
                     if let Some((active_prefix, _, _, _, active_end)) = &self.active_menu {
-                        if active_prefix == &current_prefix && *active_end == c_idx {
+                        // active_end is now a byte index, so we compare it against byte_idx
+                        if active_prefix == &current_prefix && *active_end == byte_idx {
                             needs_update = false;
                         }
                     }
@@ -350,8 +366,8 @@ impl CCslipsApp {
                                         prefix.clone(),
                                         matches,
                                         0,
-                                        c_idx - prefix.len(),
-                                        c_idx,
+                                        byte_idx - prefix.len(), // prefix.len() evaluates byte length, making this safe
+                                        byte_idx,
                                     ));
                                 } else {
                                     self.active_menu = None;
@@ -373,8 +389,8 @@ impl CCslipsApp {
                                         prefix.clone(),
                                         matches,
                                         0,
-                                        c_idx - prefix.len(),
-                                        c_idx,
+                                        byte_idx - prefix.len(),
+                                        byte_idx,
                                     ));
                                 } else {
                                     self.active_menu = None;
@@ -396,8 +412,8 @@ impl CCslipsApp {
                                         prefix.clone(),
                                         matches,
                                         0,
-                                        c_idx - prefix.len(),
-                                        c_idx,
+                                        byte_idx - prefix.len(),
+                                        byte_idx,
                                     ));
                                 } else {
                                     self.active_menu = None;
@@ -441,8 +457,8 @@ impl CCslipsApp {
                                             prefix.clone(),
                                             matches,
                                             0,
-                                            c_idx - prefix.len(),
-                                            c_idx,
+                                            byte_idx - prefix.len(),
+                                            byte_idx,
                                         ));
                                     } else {
                                         self.active_menu = None;

@@ -1210,17 +1210,17 @@ impl CCslipsApp {
 
                         // Helper to safely calculate character width (handles edge cases where text wraps)
                         let get_rect = |start: egui::Rect, end: egui::Rect| {
-                                let mut width = end.min.x - start.min.x;
-                                if end.min.y > start.min.y || width <= 0.0 {
-                                    width = (start.max.y - start.min.y) * 0.6; // Approximate font aspect ratio
-                                }
-                                egui::Rect::from_min_max(
-                                    output.galley_pos + start.min.to_vec2(),
-                                    output.galley_pos
-                                        + egui::pos2(start.min.x + width, start.max.y).to_vec2(),
-                                )
-                                .expand(1.5) // Slight padding so it looks like a nice box
-                            };
+                            let mut width = end.min.x - start.min.x;
+                            if end.min.y > start.min.y || width <= 0.0 {
+                                width = (start.max.y - start.min.y) * 0.6; // Approximate font aspect ratio
+                            }
+                            egui::Rect::from_min_max(
+                                output.galley_pos + start.min.to_vec2(),
+                                output.galley_pos
+                                    + egui::pos2(start.min.x + width, start.max.y).to_vec2(),
+                            )
+                            .expand(1.5) // Slight padding so it looks like a nice box
+                        };
 
                         let rect1 = get_rect(start1, end1);
                         let rect2 = get_rect(start2, end2);
