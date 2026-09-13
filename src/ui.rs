@@ -796,10 +796,11 @@ impl CCslipsApp {
         };
 
         ui.horizontal(|ui| {
-            if ui.button("💾 Save (Ctrl+S)").clicked() {
+            if ui.button("💾 Save & Build (Ctrl+S)").clicked() {
                 self.save_current_file();
+                self.execute_build();
             }
-            if ui.button("🚀 Build (Ctrl+B)").clicked() {
+            if ui.button("🚀 Build").clicked() {
                 self.execute_build();
             }
             ui.separator();

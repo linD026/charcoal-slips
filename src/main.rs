@@ -169,68 +169,13 @@ impl eframe::App for CCslipsApp {
         visuals.text_cursor.color = cursor_color;
 
         ctx.set_visuals(visuals);
-
         ctx.set_zoom_factor(self.config.ui.zoom_factor);
 
         // ==========================================
-        // GLOBAL SHORTCUT PROCESSING
+        // ACTION & SHORTCUT ROUTING
         // ==========================================
-        let global_shortcuts = self.shortcuts.global.clone();
-        for shortcut in global_shortcuts {
-            if shortcut.consume(ctx) {
-                match shortcut.action {
-                    AppAction::SaveFile => self.save_current_file(),
-                    AppAction::BuildProject => self.execute_build(),
-                    AppAction::CloseWindowOrFile => {
-                        if self.current_file.is_some() {
-                            self.close_file();
-                            ctx.memory_mut(|mem| {
-                                mem.surrender_focus(egui::Id::new("latex_editor"))
-                            });
-                        } else {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                    }
-                    AppAction::ZoomIn => {
-                        self.config.ui.zoom_factor =
-                            (self.config.ui.zoom_factor + 0.1).clamp(0.5, 3.0);
-                    }
-                    AppAction::ZoomOut => {
-                        self.config.ui.zoom_factor =
-                            (self.config.ui.zoom_factor - 0.1).clamp(0.5, 3.0);
-                    }
-                    AppAction::ToggleSearch => {
-                        self.search_state.is_active = true;
-                        self.search_state.focus_find = true;
-                        let editor_id = egui::Id::new("latex_editor");
-                        if let Some(state) = egui::TextEdit::load_state(ctx, editor_id) {
-                            if let Some(range) = state.cursor.char_range() {
-                                let start = range.primary.index.min(range.secondary.index);
-                                let end = range.primary.index.max(range.secondary.index);
-                                if start != end {
-                                    self.search_state.find_query = self
-                                        .editor_text
-                                        .chars()
-                                        .skip(start)
-                                        .take(end - start)
-                                        .collect();
-                                    self.perform_search(false, true);
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        if self.search_state.is_active && self.active_menu.is_none() {
-            if self.shortcuts.check_action(ctx, AppAction::AbortOrClose) {
-                self.search_state.is_active = false;
-                self.search_state.matches.clear();
-                ctx.memory_mut(|mem| mem.request_focus(egui::Id::new("latex_editor")));
-            }
-        }
+        let editor_id = egui::Id::new("latex_editor");
+        self.process_shortcuts(ctx, editor_id);
 
         if let Ok(entry) = self.rx_ai.try_recv() {
             if entry.ai_summary.starts_with("Error:") {

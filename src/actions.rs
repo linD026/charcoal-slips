@@ -364,6 +364,117 @@ impl CCslipsApp {
         self.editor_text = new_text;
         resulting_col
     }
+
+    // ==========================================
+    // ACTION & SHORTCUT ROUTING
+    // ==========================================
+    pub fn process_shortcuts(&mut self, ctx: &egui::Context, editor_id: egui::Id) {
+        let global_shortcuts = self.shortcuts.global.clone();
+        for shortcut in global_shortcuts {
+            if shortcut.consume(ctx) {
+                match shortcut.action {
+                    AppAction::SaveFile => {
+                        self.save_current_file();
+                        self.execute_build(); // Ctrl+S handles both!
+                    }
+                    AppAction::CloseWindowOrFile => {
+                        if self.current_file.is_some() {
+                            self.close_file();
+                            ctx.memory_mut(|mem| mem.surrender_focus(editor_id));
+                        } else {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    }
+                    AppAction::ZoomIn => {
+                        self.config.ui.zoom_factor =
+                            (self.config.ui.zoom_factor + 0.1).clamp(0.5, 3.0);
+                    }
+                    AppAction::ZoomOut => {
+                        self.config.ui.zoom_factor =
+                            (self.config.ui.zoom_factor - 0.1).clamp(0.5, 3.0);
+                    }
+                    AppAction::ToggleSearch => {
+                        self.search_state.is_active = true;
+                        self.search_state.focus_find = true;
+                        if let Some(state) = egui::TextEdit::load_state(ctx, editor_id) {
+                            if let Some(range) = state.cursor.char_range() {
+                                let start = range.primary.index.min(range.secondary.index);
+                                let end = range.primary.index.max(range.secondary.index);
+                                if start != end {
+                                    self.search_state.find_query = self
+                                        .editor_text
+                                        .chars()
+                                        .skip(start)
+                                        .take(end - start)
+                                        .collect();
+                                    self.perform_search(false, true);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // --- RESTORED LOGIC BELOW ---
+
+        if self.search_state.is_active && self.active_menu.is_none() {
+            if self.shortcuts.check_action(ctx, AppAction::AbortOrClose) {
+                self.search_state.is_active = false;
+                self.search_state.matches.clear();
+                ctx.memory_mut(|mem| mem.request_focus(editor_id));
+            }
+        }
+
+        if self.shortcuts.check_action(ctx, AppAction::BoldText) {
+            if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
+                if let Some(range) = state.cursor.char_range() {
+                    let start_char = range.primary.index.min(range.secondary.index);
+                    let end_char = range.primary.index.max(range.secondary.index);
+
+                    let start_byte = self
+                        .editor_text
+                        .char_indices()
+                        .nth(start_char)
+                        .map(|(i, _)| i)
+                        .unwrap_or(self.editor_text.len());
+                    let end_byte = self
+                        .editor_text
+                        .char_indices()
+                        .nth(end_char)
+                        .map(|(i, _)| i)
+                        .unwrap_or(self.editor_text.len());
+
+                    if start_byte != end_byte {
+                        // Wraps selected text in \textbf{}
+                        let selected = self.editor_text[start_byte..end_byte].to_string();
+                        let replacement = format!("\\textbf{{{}}}", selected);
+                        self.editor_text
+                            .replace_range(start_byte..end_byte, &replacement);
+
+                        let new_char_pos = start_char + replacement.chars().count();
+                        let ccursor = egui::text::CCursor::new(new_char_pos);
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                        egui::TextEdit::store_state(ctx, editor_id, state);
+                    } else {
+                        // Inserts empty \textbf{} and puts cursor inside the braces
+                        let replacement = "\\textbf{}";
+                        self.editor_text.insert_str(start_byte, replacement);
+
+                        let new_char_pos = start_char + 8; // length of "\textbf{"
+                        let ccursor = egui::text::CCursor::new(new_char_pos);
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                        egui::TextEdit::store_state(ctx, editor_id, state);
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Helpers for safe multi-byte unicode string slicing

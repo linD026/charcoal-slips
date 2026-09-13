@@ -4,7 +4,6 @@ use eframe::egui;
 pub enum AppAction {
     // Global Actions
     SaveFile,
-    BuildProject,
     CloseWindowOrFile,
     ZoomIn,
     ZoomOut,
@@ -14,6 +13,7 @@ pub enum AppAction {
     SendToAi,
     ToggleVerticalEdit,
     AbortOrClose,
+    BoldText,
 }
 
 #[derive(Clone)]
@@ -36,7 +36,6 @@ impl ShortcutDef {
         })
     }
 
-    /// Formats the shortcut neatly for UI display (e.g. "Ctrl/Cmd + Alt + V")
     pub fn display_string(&self) -> String {
         let mut s = String::new();
         if self.trigger.modifiers.command {
@@ -66,7 +65,7 @@ impl Default for ShortcutRegistry {
 
 impl ShortcutRegistry {
     pub fn new() -> Self {
-        let cmd = egui::Modifiers::COMMAND; // Maps to Ctrl on Win/Linux, Cmd on Mac
+        let cmd = egui::Modifiers::COMMAND;
         let alt = egui::Modifiers::ALT;
         let none = egui::Modifiers::NONE;
 
@@ -76,13 +75,7 @@ impl ShortcutRegistry {
                     trigger: egui::KeyboardShortcut::new(cmd, egui::Key::S),
                     secondary_trigger: None,
                     action: AppAction::SaveFile,
-                    help: "Save the current file",
-                },
-                ShortcutDef {
-                    trigger: egui::KeyboardShortcut::new(cmd, egui::Key::B),
-                    secondary_trigger: None,
-                    action: AppAction::BuildProject,
-                    help: "Execute the build pipeline",
+                    help: "Save and build the current project",
                 },
                 ShortcutDef {
                     trigger: egui::KeyboardShortcut::new(cmd, egui::Key::W),
@@ -111,6 +104,12 @@ impl ShortcutRegistry {
             ],
             editor: vec![
                 ShortcutDef {
+                    trigger: egui::KeyboardShortcut::new(cmd, egui::Key::B),
+                    secondary_trigger: None,
+                    action: AppAction::BoldText,
+                    help: "Bold the selected text (\\textbf)",
+                },
+                ShortcutDef {
                     trigger: egui::KeyboardShortcut::new(cmd, egui::Key::I),
                     secondary_trigger: None,
                     action: AppAction::SendToAi,
@@ -132,7 +131,6 @@ impl ShortcutRegistry {
         }
     }
 
-    /// Checks if a specific action was triggered and consumes it to prevent OS overlap
     pub fn check_action(&self, ctx: &egui::Context, action: AppAction) -> bool {
         for shortcut in self.global.iter().chain(self.editor.iter()) {
             if shortcut.action == action {
