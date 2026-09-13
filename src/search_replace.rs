@@ -200,7 +200,11 @@ impl CCslipsApp {
     }
 
     pub fn replace_all_matches(&mut self) {
-        if self.search_state.find_query.is_empty() || self.search_state.query_modified {
+        // Now safely aborts if there are no matches found
+        if self.search_state.find_query.is_empty()
+            || self.search_state.query_modified
+            || self.search_state.matches.is_empty()
+        {
             return;
         }
 
@@ -257,8 +261,17 @@ impl CCslipsApp {
                     self.search_state.has_reached_end = false;
                 }
 
+                // Enter will perform a search ONLY if modified, otherwise it jumps to the Next target!
                 if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    self.perform_search(false, true);
+                    if self.search_state.query_modified {
+                        self.perform_search(false, true);
+                    } else if !self.search_state.matches.is_empty() {
+                        self.search_state.has_reached_end = false;
+                        self.search_state.current_match_idx = (self.search_state.current_match_idx
+                            + 1)
+                            % self.search_state.matches.len();
+                        self.jump_to_current_match();
+                    }
                     response.request_focus();
                 }
 
@@ -355,10 +368,12 @@ impl CCslipsApp {
                     self.replace_current_match();
                 }
 
+                // Replace All button is now only enabled if matches > 0
                 if ui
                     .add_enabled(
                         !self.search_state.query_modified
-                            && !self.search_state.find_query.is_empty(),
+                            && !self.search_state.find_query.is_empty()
+                            && !self.search_state.matches.is_empty(),
                         egui::Button::new("Replace All"),
                     )
                     .clicked()
