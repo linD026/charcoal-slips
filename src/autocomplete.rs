@@ -64,7 +64,6 @@ impl BibCache {
                                 .captures_iter(&content)
                                 .filter_map(|cap| {
                                     let full_match = cap[0].to_lowercase();
-                                    // We don't want to autocomplete @string or @comment variables
                                     if full_match.starts_with("@string")
                                         || full_match.starts_with("@comment")
                                     {
@@ -98,9 +97,9 @@ impl LabelCache {
         }
     }
 
+    // Fast O(k) summation of all vectors
     pub fn get_metrics(&self) -> (usize, usize) {
         let num_files = self.files.len();
-        // Fast O(k) summation of all vectors
         let num_labels: usize = self.files.values().map(|(_, labels)| labels.len()).sum();
         (num_files, num_labels)
     }
@@ -161,7 +160,7 @@ pub fn get_file_suggestions(workspace: &Path, prefix: &str) -> Vec<String> {
 }
 
 pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
-    // 1. Detect environment triggers (cite, ref, input)
+    // 1. Detect environment triggers (cite, ref, input, begin)
     if let Some(brace_idx) = text_up_to_cursor.rfind('{') {
         let text_after_brace = &text_up_to_cursor[brace_idx..];
 
@@ -227,13 +226,12 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
         }
     }
 
-    // 2. Detect Macro triggers (e.g., typing \tex...)
     // Restrict macro detection to the CURRENT line.
     // This prevents a runaway '\' from 10 lines up from crashing the context engine.
+    // 2. Detect Macro triggers (e.g., typing \tex...)
     let current_line = text_up_to_cursor.lines().last().unwrap_or("");
     if let (Some(idx), _) | (_, Some(idx)) = (current_line.rfind('\\'), current_line.rfind("@")) {
         let slice = &current_line[idx..];
-        // Ensure the user is actively typing a macro (no spaces or braces allowed yet)
         if !slice.contains(|c: char| c.is_whitespace() || c == '{' || c == '}') {
             return AutocompleteContext::Macro(slice.to_string());
         }
@@ -255,7 +253,8 @@ impl CCslipsApp {
             self.active_menu.clone()
         {
             if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
-                selected_idx = (selected_idx + 1) % matches.len(); // Wrap to top
+                // Wrap to top
+                selected_idx = (selected_idx + 1) % matches.len();
                 self.active_menu = Some((prefix, matches, selected_idx, start_byte, end_byte));
                 autocomplete_handled = true;
             } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
@@ -263,7 +262,8 @@ impl CCslipsApp {
                     matches.len() - 1
                 } else {
                     selected_idx - 1
-                }; // Wrap to bottom
+                    // Wrap to bottom
+                };
                 self.active_menu = Some((prefix, matches, selected_idx, start_byte, end_byte));
                 autocomplete_handled = true;
             } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
@@ -285,8 +285,6 @@ impl CCslipsApp {
                     .replace_range(start_byte..end_byte, &insert_str);
 
                 let new_byte_pos = start_byte + insert_str.len() - cursor_offset;
-
-                // Convert the resulting byte position back to a character index so egui's CCursor can jump to it safely
                 let new_char_pos = self.editor_text[..new_byte_pos].chars().count();
 
                 local_jump_request = Some((new_char_pos, new_char_pos));
@@ -318,7 +316,8 @@ impl CCslipsApp {
 
         if evaluate_autocomplete && output.response.has_focus() && !autocomplete_handled {
             if let Some(cursor_range) = output.cursor_range {
-                let c_idx = cursor_range.primary.ccursor.index; // egui provides a Character index
+                // egui provides a Character index
+                let c_idx = cursor_range.primary.ccursor.index;
                 if cursor_range.primary.ccursor.index == cursor_range.secondary.ccursor.index {
                     // Safely convert character index to byte index to avoid slicing panics on multi-byte chars
                     let byte_idx = self
@@ -341,7 +340,6 @@ impl CCslipsApp {
 
                     let mut needs_update = true;
                     if let Some((active_prefix, _, _, _, active_end)) = &self.active_menu {
-                        // active_end is now a byte index, so we compare it against byte_idx
                         if active_prefix == &current_prefix && *active_end == byte_idx {
                             needs_update = false;
                         }
@@ -366,7 +364,8 @@ impl CCslipsApp {
                                         prefix.clone(),
                                         matches,
                                         0,
-                                        byte_idx - prefix.len(), // prefix.len() evaluates byte length, making this safe
+                                        // prefix.len() evaluates byte length, making this safe
+                                        byte_idx - prefix.len(),
                                         byte_idx,
                                     ));
                                 } else {
@@ -487,7 +486,6 @@ impl CCslipsApp {
             } else {
                 &self.config.ui.light_theme
             };
-
             let bg_color = parse_hex(&theme.ui.popup_bg);
             let highlight_color = parse_hex(&theme.ui.popup_selected_text);
 
@@ -520,19 +518,17 @@ impl CCslipsApp {
                                             // Pad to 5 chars ("label", "macro", "bib  ", "file ")
                                             let prefix_marker =
                                                 if is_selected { "▶" } else { " " };
-
                                             let kind_padded =
                                                 format!("{} {:<5}", prefix_marker, kind);
-                                            let word_string = format!("{}", display);
 
                                             // 2. Apply egui::RichText styling
                                             // Using .monospace() ensures the spaces actually align perfectly
                                             let mut type_text = egui::RichText::new(kind_padded)
                                                 .size(12.0)
                                                 .monospace();
-
                                             let mut word_text =
-                                                egui::RichText::new(word_string).size(14.0);
+                                                egui::RichText::new(format!("{}", display))
+                                                    .size(14.0);
 
                                             if is_selected {
                                                 type_text = type_text

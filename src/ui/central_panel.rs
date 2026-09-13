@@ -6,6 +6,153 @@ use crate::{CCslipsApp, RightTab};
 use eframe::egui;
 
 // ==========================================
+// ENVIRONMENT SYNCHRONIZATION ENGINE
+// ==========================================
+// Finds the structurally matching \end or \begin tag, and returns a replacement action if they diverge
+fn get_sync_env_edits(
+    text: &str,
+    cursor_byte_idx: usize,
+) -> Option<(std::ops::Range<usize>, String)> {
+    let max_lookback = cursor_byte_idx.saturating_sub(100);
+    let mut brace_start = None;
+    for (i, c) in text[max_lookback..cursor_byte_idx].char_indices().rev() {
+        if c == '{' {
+            brace_start = Some(max_lookback + i);
+            break;
+        }
+        if c == '}' || c == '\n' {
+            return None;
+        }
+    }
+    let brace_start = brace_start?;
+
+    let max_lookforward = (cursor_byte_idx + 100).min(text.len());
+    let mut brace_end = None;
+    for (i, c) in text[cursor_byte_idx..max_lookforward].char_indices() {
+        if c == '}' {
+            brace_end = Some(cursor_byte_idx + i);
+            break;
+        }
+        if c == '{' || c == '\n' {
+            return None;
+        }
+    }
+    let brace_end = brace_end?;
+
+    let before_brace = &text[..brace_start];
+    let is_begin = if before_brace.ends_with("\\begin") {
+        true
+    } else if before_brace.ends_with("\\end") {
+        false
+    } else {
+        return None;
+    };
+
+    let current_env_name = text[brace_start + 1..brace_end].to_string();
+
+    if is_begin {
+        // Structurally search forwards for matching \end
+        let mut depth = 1;
+        let mut search_idx = brace_end + 1;
+        while search_idx < text.len() {
+            let next_begin = text[search_idx..].find("\\begin{").map(|i| search_idx + i);
+            let next_end = text[search_idx..].find("\\end{").map(|i| search_idx + i);
+
+            match (next_begin, next_end) {
+                (Some(b), Some(e)) => {
+                    if b < e {
+                        depth += 1;
+                        search_idx = b + 7;
+                    } else {
+                        depth -= 1;
+                        if depth == 0 {
+                            if let Some(end_brace_offset) = text[e + 5..].find('}') {
+                                let match_start = e + 5;
+                                let match_end = match_start + end_brace_offset;
+                                if &text[match_start..match_end] != current_env_name {
+                                    return Some((match_start..match_end, current_env_name));
+                                }
+                            }
+                            return None;
+                        }
+                        search_idx = e + 5;
+                    }
+                }
+                (Some(b), None) => {
+                    depth += 1;
+                    search_idx = b + 7;
+                }
+                (None, Some(e)) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(end_brace_offset) = text[e + 5..].find('}') {
+                            let match_start = e + 5;
+                            let match_end = match_start + end_brace_offset;
+                            if &text[match_start..match_end] != current_env_name {
+                                return Some((match_start..match_end, current_env_name));
+                            }
+                        }
+                        return None;
+                    }
+                    search_idx = e + 5;
+                }
+                (None, None) => break,
+            }
+        }
+    } else {
+        // Structurally search backwards for matching \begin
+        let mut depth = 1;
+        let mut search_idx = before_brace.rfind("\\end").unwrap_or(0);
+        while search_idx > 0 {
+            let prev_begin = text[..search_idx].rfind("\\begin{");
+            let prev_end = text[..search_idx].rfind("\\end{");
+
+            match (prev_begin, prev_end) {
+                (Some(b), Some(e)) => {
+                    if e > b {
+                        depth += 1;
+                        search_idx = e;
+                    } else {
+                        depth -= 1;
+                        if depth == 0 {
+                            if let Some(end_brace_offset) = text[b + 7..].find('}') {
+                                let match_start = b + 7;
+                                let match_end = match_start + end_brace_offset;
+                                if &text[match_start..match_end] != current_env_name {
+                                    return Some((match_start..match_end, current_env_name));
+                                }
+                            }
+                            return None;
+                        }
+                        search_idx = b;
+                    }
+                }
+                (Some(b), None) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(end_brace_offset) = text[b + 7..].find('}') {
+                            let match_start = b + 7;
+                            let match_end = match_start + end_brace_offset;
+                            if &text[match_start..match_end] != current_env_name {
+                                return Some((match_start..match_end, current_env_name));
+                            }
+                        }
+                        return None;
+                    }
+                    search_idx = b;
+                }
+                (None, Some(e)) => {
+                    depth += 1;
+                    search_idx = e;
+                }
+                (None, None) => break,
+            }
+        }
+    }
+    None
+}
+
+// ==========================================
 // BRACKET PAIR MATCHING
 // ==========================================
 fn find_matching_brackets(text: &str, cursor_idx: usize) -> Option<(usize, usize)> {
@@ -480,6 +627,46 @@ impl CCslipsApp {
                     }
 
                     let output = self.render_editor_with_gutters(ui, editor_id);
+
+                    // Intercept text changes to trigger synchronous paired environment updating
+                    if output.response.changed() || autocomplete_handled {
+                        if let Some(cursor_range) = output.cursor_range {
+                            let c_idx = cursor_range.primary.ccursor.index;
+                            let byte_idx = self
+                                .editor_text
+                                .char_indices()
+                                .nth(c_idx)
+                                .map(|(i, _)| i)
+                                .unwrap_or(self.editor_text.len());
+
+                            if let Some((replace_range, new_name)) =
+                                get_sync_env_edits(&self.editor_text, byte_idx)
+                            {
+                                let old_len = replace_range.len();
+                                let new_len = new_name.len();
+                                self.editor_text
+                                    .replace_range(replace_range.clone(), &new_name);
+
+                                // If the replacement shifted the string BEFORE the cursor, we must update the cursor location
+                                if replace_range.end <= byte_idx {
+                                    let diff = new_len as isize - old_len as isize;
+                                    let new_byte_idx = (byte_idx as isize + diff).max(0) as usize;
+                                    let new_char_pos =
+                                        self.editor_text[..new_byte_idx].chars().count();
+
+                                    if let Some(mut state) =
+                                        egui::TextEdit::load_state(ui.ctx(), editor_id)
+                                    {
+                                        let ccursor = egui::text::CCursor::new(new_char_pos);
+                                        state.cursor.set_char_range(Some(
+                                            egui::text::CCursorRange::one(ccursor),
+                                        ));
+                                        egui::TextEdit::store_state(ui.ctx(), editor_id, state);
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     self.render_highlight_matches(ui, &output);
                     self.render_bracket_matches(ui, &output, editor_id);
