@@ -14,7 +14,7 @@ use config::{CCslipsConfig, parse_hex};
 use search_replace::*;
 
 use fileops::FileOperation;
-use shortcuts::{AppAction, ShortcutRegistry};
+use shortcuts::ShortcutRegistry;
 
 use eframe::egui;
 use std::fs;
