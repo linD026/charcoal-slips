@@ -153,7 +153,7 @@ impl CCslipsApp {
                         ui.label("Vertical Edit mode allows you to edit multiple lines of code simultaneously (Vim-style block selection).");
                         ui.add_space(8.0);
                         ui.horizontal(|ui| { ui.label(egui::RichText::new("1.").strong()); ui.label("Move your cursor to the starting position."); });
-                        ui.horizontal(|ui| { ui.label(egui::RichText::new("2.").strong()); ui.label("Press"); ui.label(egui::RichText::new("Ctrl/Cmd + Alt + V").strong().code()); ui.label("to drop the anchor cursor."); });
+                        ui.horizontal(|ui| { ui.label(egui::RichText::new("2.").strong()); ui.label("Press"); ui.label(egui::RichText::new("Alt + V").strong().code()); ui.label("to drop the anchor cursor."); });
                         ui.horizontal(|ui| { ui.label(egui::RichText::new("3.").strong()); ui.label("Use the"); ui.label(egui::RichText::new("Up").strong().code()); ui.label("and"); ui.label(egui::RichText::new("Down").strong().code()); ui.label("arrow keys to expand the block."); });
                         ui.horizontal(|ui| { ui.label(egui::RichText::new("4.").strong()); ui.label("Begin typing to push text to all lines simultaneously."); });
                         ui.horizontal(|ui| { ui.label(egui::RichText::new("5.").strong()); ui.label("Press"); ui.label(egui::RichText::new("Escape").strong().code()); ui.label("or click anywhere to return to normal editing."); });

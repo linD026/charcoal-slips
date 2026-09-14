@@ -23,12 +23,12 @@ You can modify `config_charcoal_slips.json` to change the configuration, such as
 
 ### Editor
 
-- `Ctrl`+`S` to save
+- `Ctrl`+`S` to save the current file and build.
     > Note that ccslips performs auto-save when you switch to another file.
-- `Ctrl`+`B` to save the current file and build.
     > You can customize the build command in the configuration.
 - `Ctrl`+`I` to send the selected words to LLM.
     > You can customize the system prompt and inference platform in the configuration.
+- `Ctrl + B` to bold the selected text.
 
 ### Search and Replace
 
