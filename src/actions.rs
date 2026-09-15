@@ -375,7 +375,7 @@ impl CCslipsApp {
                 match shortcut.action {
                     AppAction::SaveFile => {
                         self.save_current_file();
-                        self.execute_build(); // Ctrl+S handles both!
+                        //self.execute_build(); // Ctrl+S handles both!
                     }
                     AppAction::CloseWindowOrFile => {
                         if self.current_file.is_some() {

@@ -221,7 +221,8 @@ impl CCslipsApp {
         };
 
         ui.horizontal(|ui| {
-            if ui.button("💾 Save & Build (Ctrl+S)").clicked() {
+            //if ui.button("💾 Save & Build (Ctrl+S)").clicked() {
+            if ui.button("💾 Save (Ctrl+S)").clicked() {
                 self.save_current_file();
                 self.execute_build();
             }
