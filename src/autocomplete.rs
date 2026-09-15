@@ -82,6 +82,10 @@ impl BibCache {
                 }
             }
         }
+
+        // Sort and Deduplicate to completely eliminate repeated citation suggestions
+        all_keys.sort();
+        all_keys.dedup();
         all_keys
     }
 }
@@ -134,28 +138,47 @@ impl LabelCache {
                 }
             }
         }
+
+        // Sort and Deduplicate to completely eliminate repeated label suggestions
+        all_labels.sort();
+        all_labels.dedup();
         all_labels
     }
 }
 
 pub fn get_file_suggestions(workspace: &Path, prefix: &str) -> Vec<String> {
     let mut suggestions = Vec::new();
-    let (dir_part, file_part) = if let Some(last_slash) = prefix.rfind('/') {
-        (&prefix[..=last_slash], &prefix[last_slash + 1..])
-    } else {
-        ("", prefix)
-    };
+    let search_term = prefix.to_lowercase();
 
-    let search_dir = workspace.join(dir_part);
-    if let Ok(entries) = fs::read_dir(&search_dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with(file_part) && !name.starts_with('.') {
-                let suffix = if entry.path().is_dir() { "/" } else { "" };
-                suggestions.push(format!("{}{}{}", dir_part, name, suffix));
+    // Use walkdir to recursively search all files in the workspace.
+    // We explicitly skip hidden directories (.git) and build folders (target, build, out)
+    // to prevent duplicate matches and keep the UI lightning fast.
+    let walker = walkdir::WalkDir::new(workspace)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            !name.starts_with('.') && name != "target" && name != "build" && name != "out"
+        });
+
+    for entry in walker.flatten() {
+        let path = entry.path();
+
+        if path.is_file() {
+            if let Ok(rel_path) = path.strip_prefix(workspace) {
+                // Standardize slashes for cross-platform consistency
+                let rel_path_str = rel_path.to_string_lossy().replace('\\', "/");
+
+                // Allow substring matching in any position! (e.g., "fig11" matches "figs/data/fig11.png")
+                if rel_path_str.to_lowercase().contains(&search_term) {
+                    suggestions.push(rel_path_str);
+                }
             }
         }
     }
+
+    // Remove duplicate paths if any exist
+    suggestions.sort();
+    suggestions.dedup();
     suggestions
 }
 
@@ -226,15 +249,22 @@ pub fn detect_context(text_up_to_cursor: &str) -> AutocompleteContext {
         }
     }
 
-    // Restrict macro detection to the CURRENT line.
-    // This prevents a runaway '\' from 10 lines up from crashing the context engine.
     // 2. Detect Macro triggers (e.g., typing \tex...)
     let current_line = text_up_to_cursor.lines().last().unwrap_or("");
-    if let (Some(idx), _) | (_, Some(idx)) = (current_line.rfind('\\'), current_line.rfind("@")) {
-        let slice = &current_line[idx..];
-        if !slice.contains(|c: char| c.is_whitespace() || c == '{' || c == '}') {
-            return AutocompleteContext::Macro(slice.to_string());
-        }
+
+    // Safely grab the closest trigger symbol to avoid long-distance false positives
+    let slash_idx = current_line.rfind('\\');
+    let at_idx = current_line.rfind('@');
+    let idx = match (slash_idx, at_idx) {
+        (Some(s), Some(a)) => s.max(a),
+        (Some(s), None) => s,
+        (None, Some(a)) => a,
+        (None, None) => return AutocompleteContext::None,
+    };
+
+    let slice = &current_line[idx..];
+    if !slice.contains(|c: char| c.is_whitespace() || c == '{' || c == '}') {
+        return AutocompleteContext::Macro(slice.to_string());
     }
 
     AutocompleteContext::None
@@ -262,8 +292,7 @@ impl CCslipsApp {
                     matches.len() - 1
                 } else {
                     selected_idx - 1
-                    // Wrap to bottom
-                };
+                }; // Wrap to bottom
                 self.active_menu = Some((prefix, matches, selected_idx, start_byte, end_byte));
                 autocomplete_handled = true;
             } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
@@ -352,19 +381,35 @@ impl CCslipsApp {
                                     Path::new(&self.config.build.working_directory),
                                     &self.config.editor.bib_dir,
                                 );
-                                // Added type "bib"
-                                let matches: Vec<(String, String, String)> = keys
+                                let search_term = prefix.to_lowercase();
+
+                                let mut matches: Vec<(String, String, String)> = keys
                                     .into_iter()
-                                    .filter(|k| k.to_lowercase().contains(&prefix.to_lowercase()))
+                                    .filter(|k| k.to_lowercase().contains(&search_term))
                                     .map(|k| (k.clone(), k, "bib".to_string()))
-                                    .take(12)
                                     .collect();
+
+                                matches.sort_by(|(a, _, _), (b, _, _)| {
+                                    let a_lower = a.to_lowercase();
+                                    let b_lower = b.to_lowercase();
+                                    let a_starts = a_lower.starts_with(&search_term);
+                                    let b_starts = b_lower.starts_with(&search_term);
+                                    if a_starts && !b_starts {
+                                        std::cmp::Ordering::Less
+                                    } else if !a_starts && b_starts {
+                                        std::cmp::Ordering::Greater
+                                    } else {
+                                        a_lower.cmp(&b_lower)
+                                    }
+                                });
+                                matches.dedup_by(|a, b| a.0 == b.0);
+                                matches.truncate(12);
+
                                 if !matches.is_empty() {
                                     self.active_menu = Some((
                                         prefix.clone(),
                                         matches,
                                         0,
-                                        // prefix.len() evaluates byte length, making this safe
                                         byte_idx - prefix.len(),
                                         byte_idx,
                                     ));
@@ -376,13 +421,30 @@ impl CCslipsApp {
                                 let keys = self
                                     .label_cache
                                     .get_labels(Path::new(&self.config.build.working_directory));
-                                // Added type "label"
-                                let matches: Vec<(String, String, String)> = keys
+                                let search_term = prefix.to_lowercase();
+
+                                let mut matches: Vec<(String, String, String)> = keys
                                     .into_iter()
-                                    .filter(|k| k.to_lowercase().contains(&prefix.to_lowercase()))
+                                    .filter(|k| k.to_lowercase().contains(&search_term))
                                     .map(|k| (k.clone(), k, "label".to_string()))
-                                    .take(12)
                                     .collect();
+
+                                matches.sort_by(|(a, _, _), (b, _, _)| {
+                                    let a_lower = a.to_lowercase();
+                                    let b_lower = b.to_lowercase();
+                                    let a_starts = a_lower.starts_with(&search_term);
+                                    let b_starts = b_lower.starts_with(&search_term);
+                                    if a_starts && !b_starts {
+                                        std::cmp::Ordering::Less
+                                    } else if !a_starts && b_starts {
+                                        std::cmp::Ordering::Greater
+                                    } else {
+                                        a_lower.cmp(&b_lower)
+                                    }
+                                });
+                                matches.dedup_by(|a, b| a.0 == b.0);
+                                matches.truncate(12);
+
                                 if !matches.is_empty() {
                                     self.active_menu = Some((
                                         prefix.clone(),
@@ -400,12 +462,54 @@ impl CCslipsApp {
                                     Path::new(&self.config.build.working_directory),
                                     &prefix,
                                 );
-                                // Added type "file"
-                                let matches: Vec<(String, String, String)> = files
+                                let search_term = prefix.to_lowercase();
+
+                                let mut matches: Vec<(String, String, String)> = files
                                     .into_iter()
                                     .map(|f| (f.clone(), f, "file".to_string()))
-                                    .take(12)
                                     .collect();
+
+                                matches.sort_by(|(a, _, _), (b, _, _)| {
+                                    let a_lower = a.to_lowercase();
+                                    let b_lower = b.to_lowercase();
+
+                                    // Extract the actual filename for smarter relevance scoring
+                                    let a_name = Path::new(a)
+                                        .file_name()
+                                        .unwrap_or_default()
+                                        .to_string_lossy()
+                                        .to_lowercase();
+                                    let b_name = Path::new(b)
+                                        .file_name()
+                                        .unwrap_or_default()
+                                        .to_string_lossy()
+                                        .to_lowercase();
+
+                                    let a_name_starts = a_name.starts_with(&search_term);
+                                    let b_name_starts = b_name.starts_with(&search_term);
+                                    let a_name_contains = a_name.contains(&search_term);
+                                    let b_name_contains = b_name.contains(&search_term);
+
+                                    // 1. Filename STARTS with search term
+                                    if a_name_starts && !b_name_starts {
+                                        std::cmp::Ordering::Less
+                                    } else if !a_name_starts && b_name_starts {
+                                        std::cmp::Ordering::Greater
+                                    }
+                                    // 2. Filename CONTAINS search term
+                                    else if a_name_contains && !b_name_contains {
+                                        std::cmp::Ordering::Less
+                                    } else if !a_name_contains && b_name_contains {
+                                        std::cmp::Ordering::Greater
+                                    }
+                                    // 3. Fallback to full path alphabetical
+                                    else {
+                                        a_lower.cmp(&b_lower)
+                                    }
+                                });
+                                matches.dedup_by(|a, b| a.0 == b.0);
+                                matches.truncate(12);
+
                                 if !matches.is_empty() {
                                     self.active_menu = Some((
                                         prefix.clone(),
@@ -420,16 +524,28 @@ impl CCslipsApp {
                             }
                             AutocompleteContext::Macro(prefix) => {
                                 if self.dismissed_prefix.as_ref() != Some(&prefix) {
-                                    // Added type "macro"
+                                    let is_at_trigger = prefix.starts_with('@');
+                                    let search_term = prefix
+                                        .trim_start_matches(|c| c == '\\' || c == '@')
+                                        .to_lowercase();
+
                                     let mut matches: Vec<_> = self
                                         .config
                                         .editor
                                         .autocomplete_cmds
                                         .iter()
                                         .filter(|c| {
-                                            c.trigger
-                                                .to_lowercase()
-                                                .contains(&prefix.to_lowercase())
+                                            let c_is_at = c.trigger.starts_with('@');
+                                            if is_at_trigger != c_is_at {
+                                                return false;
+                                            }
+
+                                            // Stripping the symbol lets 'text' match inside '\mytextmacro'
+                                            let c_name = c
+                                                .trigger
+                                                .trim_start_matches(|ch| ch == '\\' || ch == '@')
+                                                .to_lowercase();
+                                            c_name.contains(&search_term)
                                         })
                                         .map(|c| {
                                             (
@@ -439,18 +555,29 @@ impl CCslipsApp {
                                             )
                                         })
                                         .collect();
+
                                     matches.sort_by(|(a, _, _), (b, _, _)| {
-                                        let a_starts = a.starts_with(&prefix);
-                                        let b_starts = b.starts_with(&prefix);
+                                        let a_name = a
+                                            .trim_start_matches(|ch| ch == '\\' || ch == '@')
+                                            .to_lowercase();
+                                        let b_name = b
+                                            .trim_start_matches(|ch| ch == '\\' || ch == '@')
+                                            .to_lowercase();
+
+                                        let a_starts = a_name.starts_with(&search_term);
+                                        let b_starts = b_name.starts_with(&search_term);
+
                                         if a_starts && !b_starts {
                                             std::cmp::Ordering::Less
                                         } else if !a_starts && b_starts {
                                             std::cmp::Ordering::Greater
                                         } else {
-                                            a.cmp(b)
+                                            a_name.cmp(&b_name)
                                         }
                                     });
+                                    matches.dedup_by(|a, b| a.0 == b.0);
                                     matches.truncate(12);
+
                                     if !matches.is_empty() {
                                         self.active_menu = Some((
                                             prefix.clone(),
@@ -486,6 +613,7 @@ impl CCslipsApp {
             } else {
                 &self.config.ui.light_theme
             };
+
             let bg_color = parse_hex(&theme.ui.popup_bg);
             let highlight_color = parse_hex(&theme.ui.popup_selected_text);
 
@@ -518,17 +646,19 @@ impl CCslipsApp {
                                             // Pad to 5 chars ("label", "macro", "bib  ", "file ")
                                             let prefix_marker =
                                                 if is_selected { "▶" } else { " " };
+
                                             let kind_padded =
                                                 format!("{} {:<5}", prefix_marker, kind);
+                                            let word_string = format!("{}", display);
 
                                             // 2. Apply egui::RichText styling
                                             // Using .monospace() ensures the spaces actually align perfectly
                                             let mut type_text = egui::RichText::new(kind_padded)
                                                 .size(12.0)
                                                 .monospace();
+
                                             let mut word_text =
-                                                egui::RichText::new(format!("{}", display))
-                                                    .size(14.0);
+                                                egui::RichText::new(word_string).size(14.0);
 
                                             if is_selected {
                                                 type_text = type_text
